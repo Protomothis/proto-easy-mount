@@ -12,6 +12,11 @@ on:
 permissions:
   contents: write
 
+# Pure Go on Windows (cgofuse loads WinFsp at run time, Gio needs no cgo).
+# The runner has gcc, which would switch cgofuse to its C build.
+env:
+  CGO_ENABLED: '0'
+
 jobs:
   release:
     runs-on: windows-latest
