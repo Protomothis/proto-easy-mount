@@ -1,0 +1,61 @@
+name: CI
+
+# gofmt, vet and tests on every push to main and milestone/* and on pull
+# requests to main. It also keeps the Go build cache warm, so a tag build
+# (release.yml) restores it instead of compiling rclone from scratch.
+on:
+  push:
+    branches:
+      - main
+      - 'milestone/**'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          # The explicit cache below also keys on *.go, so it stays current.
+          cache: false
+
+      - name: Cache Go build and module cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          # Same scheme as release.yml so tag builds hit what CI saved.
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            ${{ runner.os }}-go-
+
+      # .gitattributes pins *.go to LF, so a CRLF checkout can't fail this.
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt -l reports unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet -tags cmount ./...
+
+      - name: Test
+        run: go test -tags cmount ./...

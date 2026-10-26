@@ -1,0 +1,97 @@
+name: Build and Release
+
+# A v* tag builds the installer, signs the update manifest and publishes a
+# GitHub release whose notes are the tag's CHANGELOG.md section.
+# v1.2.3 is a release (Latest, offered to every app); v1.2.3-rc.1 is a
+# prerelease, offered only to apps with "테스트 버전도 받기" on.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - name: Cache Go build and module cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            ${{ runner.os }}-go-
+
+      # A tag may sit on a commit CI never saw, so the release gates on it too.
+      - name: Vet
+        run: go vet -tags cmount ./...
+
+      - name: Test
+        run: go test -tags cmount ./...
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue) -and
+              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          ./scripts/build-windows.ps1 -Version $version
+          "INSTALLER=dist/ProtoEasyMount-Setup-$version.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      # The app installs an update only when update.json verifies against
+      # the ed25519 key embedded in internal/release and the installer's
+      # hash matches. The seed lives only in the UPDATE_SIGNING_KEY secret.
+      - name: Sign update manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: go run ./tools/signmanifest sign -key env:UPDATE_SIGNING_KEY -version ${{ github.ref_name }} -arch amd64 -out update.json ${{ env.INSTALLER }}
+
+      # Fails when the secret and the embedded public key don't match.
+      - name: Verify update manifest
+        run: go run ./tools/signmanifest verify update.json update.json.sig
+
+      # The tag's CHANGELOG.md section; an rc without its own section gets
+      # [Unreleased], what it is a candidate for.
+      - name: Extract release notes
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $content = Get-Content CHANGELOG.md -Raw
+          $match = [regex]::Match($content, "(?s)## \[$([regex]::Escape($tag))\].*?(?=## \[|$)")
+          if (-not $match.Success -and $tag.Contains('-')) {
+            $match = [regex]::Match($content, "(?s)## \[Unreleased\].*?(?=## \[|$)")
+          }
+          $notes = $match.Value
+          if (-not $match.Success) { $notes = "_CHANGELOG.md에 [$tag] 항목이 없습니다._" }
+          $notes = $notes.TrimEnd() + "`n`n---`n도움이 됐다면 ⭐ Star나 [GitHub Sponsors](https://github.com/sponsors/Protomothis)로 응원해 주세요.`n"
+          $notes | Out-File -FilePath release_notes.txt -Encoding utf8
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.INSTALLER }}
+            dist/proto-easy-mount.exe
+            update.json
+            update.json.sig
+          body_path: release_notes.txt
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}

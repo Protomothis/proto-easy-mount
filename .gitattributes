@@ -1,0 +1,20 @@
+# Line endings are pinned so a checkout looks the same everywhere,
+# whatever core.autocrlf says (Git for Windows defaults to true, which
+# would make `gofmt -l` report every Go file).
+* text=auto
+
+*.go     text eol=lf
+*.mod    text eol=lf
+*.sum    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.sh     text eol=lf
+*.iss    text eol=crlf
+*.ps1    text eol=crlf
+
+*.png  binary
+*.ico  binary
+*.bmp  binary
+*.syso binary
