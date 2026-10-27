@@ -22,7 +22,8 @@
 
 1. [Releases](https://github.com/Protomothis/proto-easy-mount/releases/latest)에서 `ProtoEasyMount-Setup-<버전>.exe`를 받아 실행합니다.
    기본은 지금 사용자에게만, 관리자 권한 없이 설치됩니다. 첫 화면에서 "모든 사용자"를 고르면 Program Files에 설치합니다(관리자 권한 필요).
-   드라이브 연결에 필요한 [WinFsp](https://winfsp.dev)가 없으면 그것만 관리자 확인을 한 번 묻습니다.
+   드라이브 연결에 필요한 [WinFsp](https://winfsp.dev)가 없으면 공식 설치 파일을 받아(해시 확인) 설치하며, 그것만 관리자 확인을 한 번 묻습니다.
+   설치하지 못했으면 앱이 드라이브를 연결하기 전에 WinFsp 설치를 먼저 안내합니다.
 2. 앱에서 서비스를 고르고 서버 주소(`cloud.example.com`, 집 안이면 `192.168.0.10:9200` 같은 IP도 됨)를 넣습니다.
 3. 브라우저에서 로그인하면 공간 목록이 나옵니다. 스위치를 켜면 드라이브가 연결됩니다.
 
@@ -167,13 +168,13 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 - 서명 승인 (Approvers): [Protomothis](https://github.com/Protomothis)
 
 서명하는 파일은 이 저장소의 소스에서 GitHub Actions(`.github/workflows/release.yml`)로 빌드한 것뿐입니다.
-설치 파일에 함께 들어 있는 WinFsp 설치 파일은 WinFsp 제작자가 서명한 공식 파일을 그대로 씁니다.
+WinFsp는 설치 파일에 넣지 않습니다. 필요할 때 WinFsp 제작자가 서명한 공식 설치 파일을 GitHub에서 받아(고정 버전, SHA-256 확인) 그대로 실행합니다.
 
 ## 라이선스
 
 [GPL-3.0](LICENSE) © Protomothis
 
-rclone(MIT)의 Windows 마운트 계층을 고쳐 포함하고, WinFsp(GPLv3, FLOSS 예외)를 함께 설치합니다.
+rclone(MIT)의 Windows 마운트 계층을 고쳐 포함하고, 필요하면 WinFsp(GPLv3, FLOSS 예외)의 공식 설치 파일을 받아 설치합니다.
 포함된 오픈소스와 라이선스 전문은 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다.
 
 도움이 됐다면 ⭐ Star나 [GitHub Sponsors](https://github.com/sponsors/Protomothis)로 응원해 주세요.

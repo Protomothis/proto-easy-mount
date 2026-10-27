@@ -7,8 +7,13 @@
 #ifndef AppVersionNumeric
   #define AppVersionNumeric "0.0.0.0"
 #endif
-#ifndef WinFspMsi
-  #error WinFspMsi must point at the WinFsp installer
+; WinFsp is not bundled: setup downloads the pinned official installer when
+; it is missing and checks its SHA-256 (the app can do the same later).
+#ifndef WinFspUrl
+  #error WinFspUrl must name the WinFsp installer to download
+#endif
+#ifndef WinFspSha256
+  #error WinFspSha256 must give the installer's SHA-256
 #endif
 #ifndef WizardSmallImages
   #define WizardSmallImages "..\build\wizard-small-55.bmp"
@@ -63,17 +68,19 @@ korean.TaskDesktop=바탕화면에 바로 가기 만들기
 korean.TaskAutostart=컴퓨터를 켜면 자동 실행 (트레이에서 조용히 시작)
 korean.TaskGroup=추가 작업:
 korean.TaskUpdateCheck=새 버전 자동 확인 (6시간마다 GitHub에 물어봄)
+korean.WinFspDownloading=WinFsp 드라이버를 받는 중입니다…
 korean.WinFspStatus=WinFsp 드라이버를 설치하는 중입니다…
-korean.WinFspAsk=드라이브 연결에 필요한 WinFsp 드라이버를 설치합니다.%n%n다음에 뜨는 관리자 권한 확인 창에서 [예]를 눌러 주세요.
-korean.WinFspFailed=WinFsp 드라이버가 설치되지 않았습니다.%n%n앱은 설치되지만 드라이브를 연결하려면 WinFsp가 필요합니다. 나중에 https://winfsp.dev/rel/ 에서 설치할 수 있습니다.
+korean.WinFspAsk=드라이브 연결에 필요한 WinFsp 드라이버를 공식 사이트(GitHub)에서 받아 설치합니다.%n%n다음에 뜨는 관리자 권한 확인 창에서 [예]를 눌러 주세요.
+korean.WinFspFailed=WinFsp 드라이버가 설치되지 않았습니다.%n%n앱은 설치되고, 앱을 실행하면 드라이브를 연결하기 전에 WinFsp 설치를 다시 안내합니다.
 korean.LaunchApp=Proto Easy Mount 실행
 english.TaskDesktop=Create a desktop shortcut
 english.TaskAutostart=Start when I sign in to Windows (quietly, in the tray)
 english.TaskGroup=Additional tasks:
 english.TaskUpdateCheck=Check for new versions (asks GitHub every 6 hours)
+english.WinFspDownloading=Downloading the WinFsp driver…
 english.WinFspStatus=Installing the WinFsp driver…
-english.WinFspAsk=Mounting drives needs the WinFsp driver, which will be installed now.%n%nPlease choose Yes on the administrator prompt that follows.
-english.WinFspFailed=The WinFsp driver was not installed.%n%nThe app is installed, but mounting drives needs WinFsp. You can install it later from https://winfsp.dev/rel/.
+english.WinFspAsk=Mounting drives needs the WinFsp driver, which will now be downloaded from its official release (GitHub) and installed.%n%nPlease choose Yes on the administrator prompt that follows.
+english.WinFspFailed=The WinFsp driver was not installed.%n%nThe app is installed; when you start it, it offers to install WinFsp before connecting drives.
 english.LaunchApp=Launch Proto Easy Mount
 
 [Tasks]
@@ -87,7 +94,6 @@ Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\proto-easy-mount.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
-Source: "{#WinFspMsi}"; DestName: "winfsp.msi"; Flags: dontcopy
 
 [Icons]
 ; The ID lets Windows show the app's notifications (and group its taskbar button).
@@ -135,9 +141,17 @@ begin
     Exit;
   if not WizardSilent then
     MsgBox(CustomMessage('WinFspAsk'), mbInformation, MB_OK);
+  WizardForm.StatusLabel.Caption := CustomMessage('WinFspDownloading');
+  try
+    // fails unless the file's SHA-256 matches
+    DownloadTemporaryFile('{#WinFspUrl}', 'winfsp.msi', '{#WinFspSha256}', nil);
+  except
+    Log('WinFsp download failed: ' + GetExceptionMessage);
+    SuppressibleMsgBox(CustomMessage('WinFspFailed'), mbError, MB_OK, IDOK);
+    Exit;
+  end;
   WizardForm.StatusLabel.Caption := CustomMessage('WinFspStatus');
-  ExtractTemporaryFile('winfsp.msi');
-  // The installer itself runs without admin rights; elevate just msiexec.
+  // The installer itself may run without admin rights; elevate just msiexec.
   ShellExec('runas', 'msiexec.exe',
     '/i "' + ExpandConstant('{tmp}\winfsp.msi') + '" /passive /norestart',
     '', SW_SHOW, ewWaitUntilTerminated, ResultCode);

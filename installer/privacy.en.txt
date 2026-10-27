@@ -6,4 +6,4 @@ One exception: to find new versions it asks GitHub (api.github.com) for the list
 
 Sign-in details are kept in Windows Credential Manager; settings and logs stay in your user folders on this PC (proto-easy-mount in %APPDATA% and %LOCALAPPDATA%).
 
-If the WinFsp driver needed to mount drives is missing, it is installed too (administrator prompt). Other programs use WinFsp as well, so it stays when this app is uninstalled. Uninstall from Windows Settings → Apps.
+If the WinFsp driver needed to mount drives is missing, its official installer is downloaded from GitHub (github.com/winfsp), checked and run (administrator prompt). Other programs use WinFsp as well, so it stays when this app is uninstalled. Uninstall from Windows Settings → Apps.

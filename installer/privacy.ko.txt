@@ -6,4 +6,4 @@ Proto Easy Mount는 사용자가 직접 연결한 저장소 서버 말고는 어
 
 로그인 정보는 Windows 자격 증명 관리자에, 설정과 로그는 이 PC의 사용자 폴더(%APPDATA%, %LOCALAPPDATA%의 proto-easy-mount)에만 저장됩니다.
 
-드라이브 연결에 필요한 WinFsp 드라이버가 없으면 함께 설치합니다(관리자 권한 확인). WinFsp는 다른 프로그램도 쓰므로 이 앱을 제거해도 남겨 둡니다. 제거는 Windows 설정 → 앱에서 할 수 있습니다.
+드라이브 연결에 필요한 WinFsp 드라이버가 없으면 GitHub(github.com/winfsp)에서 공식 설치 파일을 받아 확인한 뒤 설치합니다(관리자 권한 확인). WinFsp는 다른 프로그램도 쓰므로 이 앱을 제거해도 남겨 둡니다. 제거는 Windows 설정 → 앱에서 할 수 있습니다.

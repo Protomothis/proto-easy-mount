@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/protomothis/proto-easy-mount/internal/provider"
 	"github.com/protomothis/proto-easy-mount/internal/store"
 	"github.com/protomothis/proto-easy-mount/internal/update"
+	"github.com/protomothis/proto-easy-mount/internal/winfspsetup"
 )
 
 type fakeProvider struct{}
@@ -353,5 +355,48 @@ func TestAutoCheckChoice(t *testing.T) {
 	u.svc.SetUpdateCheck(true)
 	if !u.autoCheck() {
 		t.Fatal("update check off although switched on in the app")
+	}
+}
+
+// Without WinFsp the window asks to install it before showing any drive;
+// once installed, the usual screen comes back.
+func TestDriverSetupFirst(t *testing.T) {
+	var installed atomic.Bool
+	oldNeeded, oldInstalled, oldInstall := winfspNeeded, winfspInstalled, winfspInstall
+	defer func() { winfspNeeded, winfspInstalled, winfspInstall = oldNeeded, oldInstalled, oldInstall }()
+	winfspNeeded = true
+	winfspInstalled = installed.Load
+	winfspInstall = func(_ context.Context, phase func(winfspsetup.Phase)) error {
+		phase(winfspsetup.Downloading)
+		phase(winfspsetup.Installing)
+		installed.Store(true)
+		return nil
+	}
+
+	u := newUI(t, true)
+	render(t, u, "")
+	if u.driverReady(layout.Context{Ops: new(op.Ops)}) {
+		t.Fatal("ready without WinFsp")
+	}
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "winfsp-setup", func(gtx C) D {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(u.header), vspace(12), layout.Rigid(u.driverCard))
+		})
+	}
+	u.driver.install.Click()
+	render(t, u, "")
+	deadline := time.Now().Add(5 * time.Second)
+	for !installed.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	u.driver.mu.Lock()
+	for u.driver.busy && time.Now().Before(deadline) {
+		u.driver.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		u.driver.mu.Lock()
+	}
+	u.driver.mu.Unlock()
+	if !u.driverReady(layout.Context{Ops: new(op.Ops)}) {
+		t.Fatal("still asking for WinFsp after installing it")
 	}
 }

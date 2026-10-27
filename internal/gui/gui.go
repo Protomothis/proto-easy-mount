@@ -68,6 +68,7 @@ type UI struct {
 	logBtn    widget.Clickable
 	dark      bool // palette in use
 	themeW    themeWidgets
+	driver    driverSetup
 	quitArmed time.Time // first click while drives are mounted only arms the button
 	accts     map[string]*acctWidgets
 	drives    map[string]*driveWidgets
@@ -216,6 +217,16 @@ func watchTheme(w *app.Window, dark *atomic.Bool, stop <-chan struct{}) {
 }
 
 func (u *UI) layout(gtx C) D {
+	if !u.driverReady(gtx) {
+		// nothing can be mounted yet: set up the driver first
+		return u.list.Layout(gtx, 3, func(gtx C, i int) D {
+			in := layout.Inset{Left: 16, Right: 16, Top: 6, Bottom: 6}
+			if i == 0 {
+				in.Top = 20
+			}
+			return in.Layout(gtx, []layout.Widget{u.header, u.driverCard, u.settings}[i])
+		})
+	}
 	accts := u.svc.Snapshot()
 	u.add.update(gtx)
 

@@ -21,20 +21,13 @@ $numeric = ([regex]::Match($Version, '^\d+\.\d+\.\d+')).Value
 if (-not $numeric) { throw "Version '$Version' is not x.y.z" }
 Write-Host "Version $Version"
 
-# WinFsp: pinned release, verified by hash.
+# WinFsp: pinned release, not bundled. Setup downloads it when it is missing
+# and checks this hash; internal/winfspsetup pins the same (a test checks).
 $winfspVersion = '2.1.25156'
 $winfspUrl = 'https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi'
 $winfspSha256 = '073A70E00F77423E34BED98B86E600DEF93393BA5822204FAC57A29324DB9F7A'
-$winfspMsi = "build\cache\winfsp-$winfspVersion.msi"
 
-New-Item -ItemType Directory -Force build\cache, dist | Out-Null
-if (-not (Test-Path $winfspMsi)) {
-    Write-Host "Downloading WinFsp $winfspVersion"
-    Invoke-WebRequest -Uri $winfspUrl -OutFile $winfspMsi -UseBasicParsing
-}
-if ((Get-FileHash $winfspMsi -Algorithm SHA256).Hash -ne $winfspSha256) {
-    throw "WinFsp installer hash mismatch: $winfspMsi"
-}
+New-Item -ItemType Directory -Force build, dist | Out-Null
 
 if ($Stage -ne 'installer') {
     # License texts of everything compiled in, shipped with the app.
@@ -72,7 +65,8 @@ $wizardImages = (Get-Content build\wizard-small.txt -Raw).Trim().Split(',') | Fo
 Invoke-Checked $iscc @('/Qp',
     "/DAppVersion=$Version",
     "/DAppVersionNumeric=$numeric.0",
-    "/DWinFspMsi=..\$winfspMsi",
+    "/DWinFspUrl=$winfspUrl",
+    "/DWinFspSha256=$($winfspSha256.ToLower())",
     "/DWizardSmallImages=$($wizardImages -join ',')",
     'installer\proto-easy-mount.iss')
 
