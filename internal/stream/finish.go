@@ -1,6 +1,9 @@
 package stream
 
 import (
+	"context"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -47,3 +50,50 @@ func finishLeft(size int64, sentAt time.Time) time.Duration {
 	total := time.Duration(float64(size) / rate * float64(time.Second))
 	return max(total-time.Since(sentAt), 0)
 }
+
+// allSent reports whether every byte has gone out to the server.
+func (u *Upload) allSent() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.readPos >= u.size
+}
+
+// fileURL is the WebDAV URL of the file being uploaded.
+func (u *Upload) fileURL() string {
+	return strings.TrimRight(u.coll, "/") + "/" + url.PathEscape(u.name)
+}
+
+// landed reports whether an upload whose last PATCH failed reached the
+// server anyway. OpenCloud answers that PATCH only after reading the whole
+// file back, and its tus layer gives up on the reply after 120 s although
+// the upload goes on to succeed (opencloud-eu/opencloud#3679): about 12 GB
+// on a hard disk. Resending would cost the whole file again, so wait for
+// the file to show up with its size (and, when it replaces one, a new
+// ETag) for as long as finishing it should take, and then some.
+func (u *Upload) landed(ctx context.Context, target string) bool {
+	c := u.cfg.Client
+	if off, err := c.Offset(ctx, target); err == nil && off < u.size {
+		return false // bytes are missing: resending them is right
+	}
+	// a finished upload's session may be gone (HEAD fails); the file tells
+	finishRate.mu.Lock()
+	rate := finishRate.rate
+	finishRate.mu.Unlock()
+	deadline := time.Now().Add(2*time.Duration(float64(u.size)/rate*float64(time.Second)) + landedGrace)
+	for {
+		fi, ok, err := c.Stat(ctx, u.fileURL())
+		if err == nil && ok && fi.Size == u.size && (u.before == "" || fi.ETag != u.before) {
+			return true
+		}
+		if u.isAborted() || time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(landedPoll)
+	}
+}
+
+// How often landed asks for the file, and how long past the estimate.
+var (
+	landedPoll  = 3 * time.Second
+	landedGrace = 2 * time.Minute
+)

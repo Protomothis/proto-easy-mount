@@ -25,12 +25,28 @@ type FakeServer struct {
 	// Finish, when set, is how long the server takes after the last byte
 	// before it answers (OpenCloud computes checksums then).
 	Finish time.Duration
+	// FailFinish answers the last PATCH with 502 although the upload goes on
+	// to succeed, as OpenCloud does when finishing outlasts its reply
+	// deadline (opencloud-eu/opencloud#3679).
+	FailFinish bool
+	// LoseFinish, with FailFinish, makes the upload fail after all: no file
+	// appears.
+	LoseFinish bool
+	// Files are finished uploads by path (directory + name), as a plain
+	// HEAD on them sees them. Tests may add a file that is already there.
+	Files map[string]FileInfo
 	// SlowRead, when set, pauses after every 64 KB of PATCH body read,
 	// to stand in for a server slower than the client.
 	SlowRead time.Duration
 }
 
 // FakeUpload is one upload's state.
+// FileInfo is a stored file as HEAD reports it.
+type FileInfo struct {
+	Size int64
+	ETag string
+}
+
 type FakeUpload struct {
 	Name string
 	Dir  string
@@ -84,7 +100,22 @@ func (s *FakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		w.Header().Set("Location", id)
 		w.WriteHeader(http.StatusCreated)
-	case http.MethodPatch, http.MethodHead:
+	case http.MethodHead:
+		if !strings.HasPrefix(r.URL.Path, "/data/") {
+			s.mu.Lock()
+			fi, ok := s.Files[r.URL.Path]
+			s.mu.Unlock()
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Length", strconv.FormatInt(fi.Size, 10))
+			w.Header().Set("ETag", fi.ETag)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		fallthrough
+	case http.MethodPatch:
 		s.mu.Lock()
 		u := s.uploads[r.URL.Path]
 		s.mu.Unlock()
@@ -126,8 +157,23 @@ func (s *FakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		u.Data = append(u.Data, b...)
 		n := len(u.Data)
 		s.mu.Unlock()
-		if s.Finish > 0 && int64(n) == u.Size {
-			time.Sleep(s.Finish)
+		if int64(n) == u.Size {
+			if s.Finish > 0 {
+				time.Sleep(s.Finish)
+			}
+			s.mu.Lock()
+			if s.Files == nil {
+				s.Files = map[string]FileInfo{}
+			}
+			if !s.LoseFinish {
+				s.next++
+				s.Files[strings.TrimSuffix(u.Dir, "/")+"/"+u.Name] = FileInfo{Size: u.Size, ETag: fmt.Sprintf(`"%d"`, s.next)}
+			}
+			s.mu.Unlock()
+			if s.FailFinish {
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
 		}
 		w.Header().Set("Upload-Offset", strconv.Itoa(n))
 		w.WriteHeader(http.StatusNoContent)

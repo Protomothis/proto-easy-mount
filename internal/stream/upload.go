@@ -91,6 +91,7 @@ type Upload struct {
 	readPos   int64     // how far the sender has consumed the shadow
 	sent      int64     // bytes the server acknowledged
 	sentAt    time.Time // when the last byte went out; the server then finishes
+	before    string    // ETag of a file the upload replaces, "" when there was none
 	failed    error     // sending gave up; the shadow is still complete
 	aborted   bool
 	committed bool          // the server-side upload exists and sending runs
@@ -141,6 +142,10 @@ func (u *Upload) Commit(ctx context.Context, mtime time.Time) error {
 	meta := map[string]string{}
 	if !mtime.IsZero() {
 		meta["mtime"] = strconv.FormatInt(mtime.Unix(), 10)
+	}
+	// What is there now, to tell the new file from it later (see landed).
+	if fi, ok, err := u.cfg.Client.Stat(ctx, u.fileURL()); err == nil && ok {
+		u.before = fi.ETag
 	}
 	target, err := u.cfg.Client.Create(ctx, u.coll, u.name, u.size, meta)
 	if err != nil {
@@ -330,6 +335,11 @@ func (u *Upload) send(target string) {
 				off = got
 				break
 			}
+			if u.allSent() && u.landed(ctx, target) {
+				slog.Info(fmt.Sprintf("업로드 응답은 실패했지만 서버에 파일이 있음 %s: %v", u.name, err))
+				off, err = u.size, nil
+				break
+			}
 			if u.isAborted() || try >= u.cfg.Tries {
 				break
 			}
@@ -339,6 +349,9 @@ func (u *Upload) send(target string) {
 			u.mu.Unlock()
 			time.Sleep(retryDelay(try))
 			if got, oerr := u.cfg.Client.Offset(ctx, target); oerr == nil {
+				if got >= u.size {
+					break // the server has every byte but no file came of it: nothing to resend
+				}
 				off = got
 				n = u.cfg.patchLen(off, u.size)
 			}
