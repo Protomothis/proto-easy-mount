@@ -106,6 +106,7 @@ type Option struct {
 	Label    string
 	Hint     string
 	Advanced bool // hidden behind "advanced settings" unless needed
+	Secret   bool // a password: masked while typed, kept in the keychain by the provider
 }
 
 // LoginOptions are the user's inputs for signing in.
@@ -137,8 +138,9 @@ type Provider interface {
 	Logout(ctx context.Context, acct Account, sec Secret) error
 	// Drives lists what the account can mount.
 	Drives(ctx context.Context, acct Account, sec Secret) ([]Drive, error)
-	// Remote turns a drive into an rclone backend definition.
-	Remote(env Env, acct Account, d Drive) (Remote, error)
+	// Remote turns a drive into an rclone backend definition. sec is the
+	// current secret, for providers that hand rclone a password.
+	Remote(env Env, acct Account, sec Secret, d Drive) (Remote, error)
 }
 
 // Instant is implemented by providers whose servers take resumable (tus)

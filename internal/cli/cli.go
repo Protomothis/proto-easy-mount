@@ -213,7 +213,7 @@ func (a *app) mountCmd() *cobra.Command {
 
 			var mounted []*mount.Mounted
 			for _, d := range chosen {
-				r, err := p.Remote(a.env(), acct, d)
+				r, err := p.Remote(a.env(), acct, sec, d)
 				if err != nil {
 					return err
 				}

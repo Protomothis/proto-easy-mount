@@ -1,12 +1,13 @@
 name: CI
 
-# gofmt, vet and tests on every push to main and milestone/* and on pull
+# gofmt, vet and tests on every push to main, develop and milestone/* and on pull
 # requests to main. It also keeps the Go build cache warm, so a tag build
 # (release.yml) restores it instead of compiling rclone from scratch.
 on:
   push:
     branches:
       - main
+      - develop
       - 'milestone/**'
   pull_request:
     branches:

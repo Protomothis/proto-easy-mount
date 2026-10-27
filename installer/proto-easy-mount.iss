@@ -7,8 +7,13 @@
 #ifndef AppVersionNumeric
   #define AppVersionNumeric "0.0.0.0"
 #endif
-#ifndef WinFspMsi
-  #error WinFspMsi must point at the WinFsp installer
+; WinFsp is not bundled: setup downloads the pinned official installer when
+; it is missing and checks its SHA-256 (the app can do the same later).
+#ifndef WinFspUrl
+  #error WinFspUrl must name the WinFsp installer to download
+#endif
+#ifndef WinFspSha256
+  #error WinFspSha256 must give the installer's SHA-256
 #endif
 #ifndef WizardSmallImages
   #define WizardSmallImages "..\build\wizard-small-55.bmp"
@@ -17,6 +22,7 @@
 #define AppName "Proto Easy Mount"
 #define AppExe "proto-easy-mount-app.exe"
 #define RunValue "ProtoEasyMount"
+#define AppUserModelID "Protomothis.ProtoEasyMount"
 
 [Setup]
 AppId={{6F0B3C7E-2D4A-4E8B-9C51-7A2E9D4B1F30}
@@ -26,9 +32,13 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisher=Protomothis
 VersionInfoVersion={#AppVersionNumeric}
 VersionInfoProductVersion={#AppVersionNumeric}
-; Per-user install: no admin rights needed, also for updates.
-; Only the WinFsp driver asks for elevation, and only when it is missing.
+; Installs for the current user by default: no admin rights needed, also for
+; updates; only the WinFsp driver asks for elevation, and only when missing.
+; The first page offers installing for all users instead (Program Files,
+; needs admin, and so do its updates). Updates keep the mode chosen first
+; (UsePreviousPrivileges); /ALLUSERS or /CURRENTUSER pick it on the command line.
 PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog commandline
 DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=auto
@@ -50,48 +60,60 @@ RestartApplications=no
 ShowLanguageDialog=auto
 
 [Languages]
-Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"; InfoBeforeFile: "privacy.ko.txt"
+Name: "english"; MessagesFile: "compiler:Default.isl"; InfoBeforeFile: "privacy.en.txt"
 
 [CustomMessages]
 korean.TaskDesktop=바탕화면에 바로 가기 만들기
 korean.TaskAutostart=컴퓨터를 켜면 자동 실행 (트레이에서 조용히 시작)
 korean.TaskGroup=추가 작업:
+korean.TaskUpdateCheck=새 버전 자동 확인 (6시간마다 GitHub에 물어봄)
+korean.WinFspDownloading=WinFsp 드라이버를 받는 중입니다…
 korean.WinFspStatus=WinFsp 드라이버를 설치하는 중입니다…
-korean.WinFspAsk=드라이브 연결에 필요한 WinFsp 드라이버를 설치합니다.%n%n다음에 뜨는 관리자 권한 확인 창에서 [예]를 눌러 주세요.
-korean.WinFspFailed=WinFsp 드라이버가 설치되지 않았습니다.%n%n앱은 설치되지만 드라이브를 연결하려면 WinFsp가 필요합니다. 나중에 https://winfsp.dev/rel/ 에서 설치할 수 있습니다.
+korean.WinFspAsk=드라이브 연결에 필요한 WinFsp 드라이버를 공식 사이트(GitHub)에서 받아 설치합니다.%n%n다음에 뜨는 관리자 권한 확인 창에서 [예]를 눌러 주세요.
+korean.WinFspFailed=WinFsp 드라이버가 설치되지 않았습니다.%n%n앱은 설치되고, 앱을 실행하면 드라이브를 연결하기 전에 WinFsp 설치를 다시 안내합니다.
 korean.LaunchApp=Proto Easy Mount 실행
 english.TaskDesktop=Create a desktop shortcut
 english.TaskAutostart=Start when I sign in to Windows (quietly, in the tray)
 english.TaskGroup=Additional tasks:
+english.TaskUpdateCheck=Check for new versions (asks GitHub every 6 hours)
+english.WinFspDownloading=Downloading the WinFsp driver…
 english.WinFspStatus=Installing the WinFsp driver…
-english.WinFspAsk=Mounting drives needs the WinFsp driver, which will be installed now.%n%nPlease choose Yes on the administrator prompt that follows.
-english.WinFspFailed=The WinFsp driver was not installed.%n%nThe app is installed, but mounting drives needs WinFsp. You can install it later from https://winfsp.dev/rel/.
+english.WinFspAsk=Mounting drives needs the WinFsp driver, which will now be downloaded from its official release (GitHub) and installed.%n%nPlease choose Yes on the administrator prompt that follows.
+english.WinFspFailed=The WinFsp driver was not installed.%n%nThe app is installed; when you start it, it offers to install WinFsp before connecting drives.
 english.LaunchApp=Launch Proto Easy Mount
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:TaskDesktop}"; GroupDescription: "{cm:TaskGroup}"; Flags: unchecked
-Name: "autostart"; Description: "{cm:TaskAutostart}"; GroupDescription: "{cm:TaskGroup}"
+Name: "updatecheck"; Description: "{cm:TaskUpdateCheck}"; GroupDescription: "{cm:TaskGroup}"
+; Per user: for an all-users install each person turns it on in the app.
+Name: "autostart"; Description: "{cm:TaskAutostart}"; GroupDescription: "{cm:TaskGroup}"; Check: not IsAdminInstallMode
 
 [Files]
 Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\proto-easy-mount.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
-Source: "{#WinFspMsi}"; DestName: "winfsp.msi"; Flags: dontcopy
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+; The ID lets Windows show the app's notifications (and group its taskbar button).
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppUserModelID}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
 ; Same value the app writes from its own "start at login" switch.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#RunValue}"; ValueData: """{app}\{#AppExe}"" --background"; Tasks: autostart
 
+; The app reads this when its own switch was never touched (internal/update).
+; HKA is HKLM for an all-users install, HKCU otherwise.
+Root: HKA; Subkey: "Software\Protomothis\ProtoEasyMount"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Protomothis\ProtoEasyMount"; ValueType: dword; ValueName: "UpdateCheck"; ValueData: "1"; Tasks: updatecheck
+Root: HKA; Subkey: "Software\Protomothis\ProtoEasyMount"; ValueType: dword; ValueName: "UpdateCheck"; ValueData: "0"; Tasks: not updatecheck
+
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 ; The app's own updater runs setup quietly with /RELAUNCH=1 after quitting.
-Filename: "{app}\{#AppExe}"; Flags: nowait; Check: Relaunch
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: Relaunch
 
 [UninstallRun]
 ; The app keeps running in the tray; stop it so its files can be removed.
@@ -119,9 +141,17 @@ begin
     Exit;
   if not WizardSilent then
     MsgBox(CustomMessage('WinFspAsk'), mbInformation, MB_OK);
+  WizardForm.StatusLabel.Caption := CustomMessage('WinFspDownloading');
+  try
+    // fails unless the file's SHA-256 matches
+    DownloadTemporaryFile('{#WinFspUrl}', 'winfsp.msi', '{#WinFspSha256}', nil);
+  except
+    Log('WinFsp download failed: ' + GetExceptionMessage);
+    SuppressibleMsgBox(CustomMessage('WinFspFailed'), mbError, MB_OK, IDOK);
+    Exit;
+  end;
   WizardForm.StatusLabel.Caption := CustomMessage('WinFspStatus');
-  ExtractTemporaryFile('winfsp.msi');
-  // The installer itself runs without admin rights; elevate just msiexec.
+  // The installer itself may run without admin rights; elevate just msiexec.
   ShellExec('runas', 'msiexec.exe',
     '/i "' + ExpandConstant('{tmp}\winfsp.msi') + '" /passive /norestart',
     '', SW_SHOW, ewWaitUntilTerminated, ResultCode);

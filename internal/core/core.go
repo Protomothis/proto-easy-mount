@@ -12,13 +12,16 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/protomothis/proto-easy-mount/internal/mount"
 	"github.com/protomothis/proto-easy-mount/internal/provider"
 	"github.com/protomothis/proto-easy-mount/internal/store"
 
 	// registered providers
+	_ "github.com/protomothis/proto-easy-mount/internal/provider/nextcloud"
 	_ "github.com/protomothis/proto-easy-mount/internal/provider/opencloud"
+	_ "github.com/protomothis/proto-easy-mount/internal/provider/webdav"
 )
 
 // Env builds the provider environment. The token command re-runs this
@@ -65,6 +68,9 @@ const (
 	Connecting
 	Mounted
 	Failed
+	// Suspended: switched off while the server was unreachable; it comes
+	// back by itself once the server answers again.
+	Suspended
 )
 
 // DriveView is a drive together with its mount state.
@@ -112,8 +118,9 @@ type accountState struct {
 	instant bool // the server takes tus uploads (instant mode)
 	loading bool
 	err     string
-	signIn  bool // the session is gone; err asks to sign in again
-	restore bool // remount the drives left connected once the list loads
+	signIn  bool   // the session is gone; err asks to sign in again
+	restore bool   // remount the drives left connected once the list loads
+	health  health // network watch
 }
 
 type mountKey struct{ acct, drive string }
@@ -126,6 +133,13 @@ type mountState struct {
 	// stopping is set when the user asked to unmount, so the waiter
 	// does not report the end of the mount as a failure.
 	stopping bool
+	// suspended is set when the network watch switched the drive off.
+	suspended bool
+	// While the network watch brings a drive back: whether this mount is
+	// such an attempt, how many there were, and when the next may start.
+	resuming bool
+	tries    int
+	nextTry  time.Time
 	uploads  int
 }
 
@@ -142,6 +156,8 @@ type Service struct {
 	mounts    map[mountKey]*mountState
 	listeners []func()
 	activity  Activity
+	// Notify, when set, shows a system notification (network watch).
+	Notify func(title, text string)
 }
 
 // New loads saved accounts. Drive lists are fetched by Refresh.
@@ -455,7 +471,11 @@ func (s *Service) RefreshAll(ctx context.Context) {
 }
 
 // Mount starts mounting a drive in the background.
-func (s *Service) Mount(acctID, driveID string) {
+func (s *Service) Mount(acctID, driveID string) { s.mount(acctID, driveID, false) }
+
+// mount mounts a drive; resume is set when the network watch brings back a
+// drive it switched off, which goes back to Suspended if it fails.
+func (s *Service) mount(acctID, driveID string, resume bool) {
 	k := mountKey{acctID, driveID}
 	s.mu.Lock()
 	as := s.accounts[acctID]
@@ -475,6 +495,13 @@ func (s *Service) Mount(acctID, driveID string) {
 	}
 	d := *drive
 	ms := &mountState{state: Connecting}
+	if prev := s.mounts[k]; resume {
+		if prev == nil || prev.state != Suspended {
+			s.mu.Unlock()
+			return // switched off by hand meanwhile
+		}
+		ms.resuming, ms.tries, ms.target = true, prev.tries+1, prev.target
+	}
 	s.mounts[k] = ms
 	s.mu.Unlock()
 	s.notify()
@@ -488,6 +515,12 @@ func (s *Service) Mount(acctID, driveID string) {
 		s.mu.Lock()
 		cancelled := ms.stopping
 		switch {
+		case err != nil && ms.resuming && !ms.stopping:
+			// the server answers but the drive won't come back yet: stay
+			// switched off and try again later, waiting longer each time
+			wait := resumeBackoff(ms.tries)
+			ms.state, ms.err, ms.suspended, ms.nextTry = Suspended, err.Error(), true, time.Now().Add(wait)
+			slog.Warn(fmt.Sprintf("다시 연결 실패 %s/%s (%d번째), %v 뒤 다시 시도: %v", acctID, d.Name, ms.tries, wait, err))
 		case err != nil:
 			ms.state, ms.err = Failed, err.Error()
 			slog.Error(fmt.Sprintf("연결 실패 %s/%s: %v", acctID, d.Name, err))
@@ -498,6 +531,7 @@ func (s *Service) Mount(acctID, driveID string) {
 			ms.state, ms.target, ms.m = Mounted, m.Target, m
 			slog.Info(fmt.Sprintf("연결됨 %s/%s → %s", acctID, d.Name, m.Target))
 		}
+		resumed := ms.resuming && err == nil && !cancelled
 		s.mu.Unlock()
 		if err == nil && cancelled {
 			m.Unmount()
@@ -507,6 +541,9 @@ func (s *Service) Mount(acctID, driveID string) {
 		if err == nil {
 			s.prefs.setMounted(acctID, driveID, true)
 		}
+		if resumed {
+			s.toast("드라이브를 다시 연결했어요", fmt.Sprintf("서버에 다시 연결돼 %s 드라이브를 켰어요.", m.Target))
+		}
 		s.notify()
 		if err != nil {
 			return
@@ -514,7 +551,9 @@ func (s *Service) Mount(acctID, driveID string) {
 
 		werr := m.Wait()
 		s.mu.Lock()
-		if ms.stopping || werr == nil {
+		if ms.suspended {
+			ms.state, ms.m = Suspended, nil // keeps target: it comes back there
+		} else if ms.stopping || werr == nil {
 			ms.state, ms.target, ms.m = Idle, "", nil
 		} else {
 			ms.state, ms.err, ms.m = Failed, werr.Error(), nil
@@ -528,10 +567,11 @@ func (s *Service) Mount(acctID, driveID string) {
 func (s *Service) start(as *accountState, d provider.Drive) (*mount.Mounted, error) {
 	ctx := context.Background()
 	// Fail early with a clear message if the session is gone.
-	if _, err := s.store.FreshSecret(ctx, as.acct, as.prov); err != nil {
+	sec, err := s.store.FreshSecret(ctx, as.acct, as.prov)
+	if err != nil {
 		return nil, sessionError(err)
 	}
-	r, err := as.prov.Remote(s.env, as.acct, d)
+	r, err := as.prov.Remote(s.env, as.acct, sec, d)
 	if err != nil {
 		return nil, err
 	}
@@ -627,9 +667,10 @@ func (s *Service) unmount(acctID, driveID string, forget bool) {
 	ms := s.mounts[k]
 	var m *mount.Mounted
 	if ms != nil {
-		if ms.state == Failed {
-			ms.state, ms.err = Idle, ""
+		if ms.state == Failed || ms.state == Suspended {
+			ms.state, ms.err, ms.target = Idle, "", ""
 		}
+		ms.suspended = false // switched off by hand: stays off
 		m = ms.m
 		ms.stopping = true
 	}

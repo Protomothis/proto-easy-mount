@@ -52,7 +52,9 @@ func main() {
 
 	for _, t := range targets {
 		rs := &winres.ResourceSet{}
-		if err := rs.SetIcon(winres.Name("APPICON"), ico); err != nil {
+		// ID 1: Gio loads the window and taskbar icon by that ID (or IDI_APPLICATION),
+		// and Explorer shows the first icon group as the file icon.
+		if err := rs.SetIcon(winres.ID(1), ico); err != nil {
 			log.Fatal(err)
 		}
 		vi := version.Info{FileVersion: nums, ProductVersion: nums}

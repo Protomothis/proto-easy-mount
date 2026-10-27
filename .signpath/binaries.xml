@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "binaries": the zip release.yml uploads
+     with the two exes at its root. Paste into the SignPath project. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="proto-easy-mount-app.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="proto-easy-mount.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

@@ -253,3 +253,93 @@ func TestHeldWritesDontWait(t *testing.T) {
 		t.Fatalf("upload = %+v", got)
 	}
 }
+
+// While the server finishes a fully sent file, Status says so with an
+// estimate, and the time it took is learned for the next estimate.
+func TestFinishEstimate(t *testing.T) {
+	old := learnFrom
+	learnFrom = 0
+	defer func() { learnFrom = old }()
+	finishRate.rate, finishRate.learned = defaultFinishRate, false
+
+	fake := &tustest.FakeServer{Finish: 300 * time.Millisecond}
+	cfg, coll := setup(t, fake, 0, 1<<20)
+	const size = 1 << 20
+	u, err := Start(context.Background(), cfg, coll, "big.bin", size, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Close()
+	u.WriteAt(randomBytes(size), 0)
+	deadline := time.Now().Add(5 * time.Second)
+	for !u.Status().Waiting && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !u.Status().Waiting {
+		t.Fatal("never reported waiting for the server")
+	}
+	waitOK(t, u)
+	// learned: 1 MB in ~0.3 s, far slower than the 100 MB/s default
+	if r := finishRate.rate; r > 10<<20 {
+		t.Fatalf("finish rate %.0f B/s not learned", r)
+	}
+	if left := finishLeft(size, time.Now()); left < 200*time.Millisecond || left > time.Second {
+		t.Fatalf("estimate after learning = %v", left)
+	}
+}
+
+// OpenCloud may answer the last PATCH of a large upload with 502 although
+// the file went on to land (its reply deadline ran out while it computed
+// checksums). The upload must count as done, not send the file again.
+func TestLastPatchFailsButFileLands(t *testing.T) {
+	defer quickLanded()()
+	var patches atomic.Int32
+	fake := &tustest.FakeServer{FailFinish: true, Finish: 50 * time.Millisecond, OnPatch: func(int64) { patches.Add(1) }}
+	cfg, coll := setup(t, fake, 0, 1<<20)
+	data := randomBytes(2 << 20)
+	u, err := Start(context.Background(), cfg, coll, "huge.bin", int64(len(data)), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Close()
+	u.WriteAt(data, 0)
+	waitOK(t, u)
+	if n := patches.Load(); n != 1 {
+		t.Fatalf("%d PATCH requests, want 1 (the file was sent again)", n)
+	}
+}
+
+// Replacing a file: the old one is already there with the same size, so
+// only a new ETag proves the upload landed; without one it failed.
+func TestLandedNeedsNewFileWhenReplacing(t *testing.T) {
+	defer quickLanded()()
+	data := randomBytes(1 << 20)
+	path := "/dav/spaces/s/dir/same.bin"
+	fake := &tustest.FakeServer{FailFinish: true, LoseFinish: true,
+		Files: map[string]tustest.FileInfo{path: {Size: int64(len(data)), ETag: `"old"`}}}
+	cfg, coll := setup(t, fake, 0, 1<<20)
+	u, err := Start(context.Background(), cfg, coll, "same.bin", int64(len(data)), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Close()
+	u.WriteAt(data, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := u.Wait(ctx); err == nil {
+		t.Fatal("the old file was taken for the new upload")
+	}
+	// the shadow still has it all, for the write cache to take over
+	got := make([]byte, len(data))
+	if _, err := u.Shadow().ReadAt(got, 0); err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("shadow lost data: %v", err)
+	}
+}
+
+// quickLanded shortens landed's waiting for tests and restores it.
+func quickLanded() func() {
+	poll, grace, rate := landedPoll, landedGrace, finishRate.rate
+	landedPoll, landedGrace = 10*time.Millisecond, 300*time.Millisecond
+	finishRate.rate = 1 << 30
+	return func() { landedPoll, landedGrace, finishRate.rate = poll, grace, rate }
+}

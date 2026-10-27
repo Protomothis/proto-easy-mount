@@ -38,9 +38,11 @@ const (
 	dropped                // deleted while uploading
 )
 
-// flushWait caps how long closing a file waits for the server, so the
-// filesystem request can't hit the OS timeout; the rest finishes in the
-// background.
+// flushWait caps how long one filesystem request waits for the server:
+// WinFsp cancels a request after 5 minutes (FspFsctlIrpTimeoutDefault; the
+// FUSE layer can't change it). A copy gets two such waits, in its last
+// write and in setting the time, about 8 minutes; past that the server
+// finishes in the background.
 var flushWait = 4 * time.Minute
 
 // Handle is a vfs.Handle that streams a freshly written file to the server
@@ -131,6 +133,18 @@ func (h *Handle) WriteAt(p []byte, off int64) (int, error) {
 		h.mu.Unlock()
 		// may wait for the server; don't hold the handle lock meanwhile
 		n, err := up.WriteAt(p, off)
+		if err == nil && up.Committed() && up.Complete() {
+			// The write that completes the file waits for the server too:
+			// each request may only wait flushWait, so a server needing
+			// longer (very large files) gets this wait and SetModTime's.
+			// It only waits: a program may still go back and rewrite a
+			// header, which then moves the file to the write cache.
+			// (A held-back file isn't committed yet: it waits in SetModTime.)
+			ctx, cancel := context.WithTimeout(context.Background(), flushWait)
+			up.Wait(ctx)
+			cancel()
+			return n, nil
+		}
 		if err == nil || !(errors.Is(err, ErrRewrite) || errors.Is(err, ErrOutOfRange) || errors.Is(err, ErrAborted)) {
 			return n, err
 		}

@@ -1,6 +1,8 @@
 # Builds the Windows binaries and the setup executable into dist\.
-#   powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1 [-Version 0.1.0]
-param([string]$Version)
+#   powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1 [-Version 0.1.0] [-Stage all|binaries|installer]
+# The release workflow runs the stages apart, to code sign the binaries
+# before they are packed and the installer after.
+param([string]$Version, [ValidateSet('all', 'binaries', 'installer')][string]$Stage = 'all')
 
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -19,37 +21,37 @@ $numeric = ([regex]::Match($Version, '^\d+\.\d+\.\d+')).Value
 if (-not $numeric) { throw "Version '$Version' is not x.y.z" }
 Write-Host "Version $Version"
 
-# WinFsp: pinned release, verified by hash.
+# WinFsp: pinned release, not bundled. Setup downloads it when it is missing
+# and checks this hash; internal/winfspsetup pins the same (a test checks).
 $winfspVersion = '2.1.25156'
 $winfspUrl = 'https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi'
 $winfspSha256 = '073A70E00F77423E34BED98B86E600DEF93393BA5822204FAC57A29324DB9F7A'
-$winfspMsi = "build\cache\winfsp-$winfspVersion.msi"
 
-New-Item -ItemType Directory -Force build\cache, dist | Out-Null
-if (-not (Test-Path $winfspMsi)) {
-    Write-Host "Downloading WinFsp $winfspVersion"
-    Invoke-WebRequest -Uri $winfspUrl -OutFile $winfspMsi -UseBasicParsing
+New-Item -ItemType Directory -Force build, dist | Out-Null
+
+if ($Stage -ne 'installer') {
+    # License texts of everything compiled in, shipped with the app.
+    Invoke-Checked go @('run', './tools/notices', '-o', 'build\THIRD-PARTY-NOTICES.txt')
+
+    # Icons, version info and manifest for the executables and the installer.
+    Invoke-Checked go @('run', './tools/mkwinres', '-version', $Version, '-assets', 'build')
+
+    # rclone reports this in its User-Agent and our log; without it, "-DEV".
+    $rcloneVersion = (go list -m -f '{{.Version}}' github.com/rclone/rclone).Trim()
+    $env:GOOS = 'windows'
+    $env:GOARCH = 'amd64'
+    Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
+        '-ldflags', "-s -w -H windowsgui -X main.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
+        '-o', 'dist\proto-easy-mount-app.exe', './cmd/proto-easy-mount-app')
+    Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
+        '-ldflags', "-s -w -X github.com/protomothis/proto-easy-mount/internal/cli.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
+        '-o', 'dist\proto-easy-mount.exe', './cmd/proto-easy-mount')
 }
-if ((Get-FileHash $winfspMsi -Algorithm SHA256).Hash -ne $winfspSha256) {
-    throw "WinFsp installer hash mismatch: $winfspMsi"
+
+if ($Stage -eq 'binaries') {
+    Get-ChildItem dist | Format-Table Name, Length
+    return
 }
-
-# License texts of everything compiled in, shipped with the app.
-Invoke-Checked go @('run', './tools/notices', '-o', 'build\THIRD-PARTY-NOTICES.txt')
-
-# Icons, version info and manifest for the executables and the installer.
-Invoke-Checked go @('run', './tools/mkwinres', '-version', $Version, '-assets', 'build')
-
-# rclone reports this in its User-Agent and our log; without it, "-DEV".
-$rcloneVersion = (go list -m -f '{{.Version}}' github.com/rclone/rclone).Trim()
-$env:GOOS = 'windows'
-$env:GOARCH = 'amd64'
-Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
-    '-ldflags', "-s -w -H windowsgui -X main.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
-    '-o', 'dist\proto-easy-mount-app.exe', './cmd/proto-easy-mount-app')
-Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
-    '-ldflags', "-s -w -X github.com/protomothis/proto-easy-mount/internal/cli.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
-    '-o', 'dist\proto-easy-mount.exe', './cmd/proto-easy-mount')
 
 $iscc = $null
 $found = Get-Command iscc.exe -ErrorAction SilentlyContinue
@@ -63,7 +65,8 @@ $wizardImages = (Get-Content build\wizard-small.txt -Raw).Trim().Split(',') | Fo
 Invoke-Checked $iscc @('/Qp',
     "/DAppVersion=$Version",
     "/DAppVersionNumeric=$numeric.0",
-    "/DWinFspMsi=..\$winfspMsi",
+    "/DWinFspUrl=$winfspUrl",
+    "/DWinFspSha256=$($winfspSha256.ToLower())",
     "/DWizardSmallImages=$($wizardImages -join ',')",
     'installer\proto-easy-mount.iss')
 
