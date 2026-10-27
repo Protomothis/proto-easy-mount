@@ -45,7 +45,7 @@ type updater struct {
 
 type aboutWidgets struct {
 	check, install, notes, repo, sponsor, licenses widget.Clickable
-	testChannel                                    widget.Bool
+	testChannel, autoCheckSw                       widget.Bool
 }
 
 // NewVersion returns the tag of a release newer than the running one, or "".
@@ -68,7 +68,9 @@ func (u *UI) WatchUpdates(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			u.checkUpdate()
+			if u.autoCheck() {
+				u.checkUpdate()
+			}
 			t.Reset(checkEvery)
 		}
 	}
@@ -256,6 +258,24 @@ func (u *UI) about(gtx C) D {
 			}),
 			vspace(14),
 			layout.Rigid(func(gtx C) D {
+				if aw.autoCheckSw.Update(gtx) {
+					u.svc.SetUpdateCheck(aw.autoCheckSw.Value)
+				}
+				aw.autoCheckSw.Value = u.autoCheck()
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx C) D {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(label(u.th, 14, "업데이트 자동 확인", colText, font.Normal).Layout),
+							vspace(2),
+							layout.Rigid(label(u.th, 12, "6시간마다 GitHub에 새 버전을 물어봐요", colSub, font.Normal).Layout),
+						)
+					}),
+					hspace(12),
+					layout.Rigid(toggle(u.th, &aw.autoCheckSw, "업데이트 자동 확인").Layout),
+				)
+			}),
+			vspace(14),
+			layout.Rigid(func(gtx C) D {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(smallButton(u.th, &aw.repo, "GitHub", colSub).Layout),
 					hspace(6),
@@ -290,4 +310,14 @@ func displayVersion(v string) string {
 		return v
 	}
 	return "v" + v
+}
+
+// autoCheck is whether to ask GitHub for new versions every few hours: the
+// choice made in the app, else the installer's (privacy: this is the only
+// request to anyone but the user's own servers).
+func (u *UI) autoCheck() bool {
+	if on := u.svc.UpdateCheck(); on != nil {
+		return *on
+	}
+	return update.InstallerDefault()
 }

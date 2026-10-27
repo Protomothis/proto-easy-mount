@@ -27,6 +27,9 @@ type Prefs struct {
 	// KeepMountedOffline leaves drives on while their server is unreachable
 	// (by default they are switched off and back on).
 	KeepMountedOffline bool `json:"keep_mounted_offline,omitempty"`
+	// UpdateCheck, when set, says whether to ask GitHub for new versions
+	// every few hours; unset follows the installer's choice (on by default).
+	UpdateCheck *bool `json:"update_check,omitempty"`
 
 	path string
 	mu   sync.Mutex
@@ -185,5 +188,25 @@ func (s *Service) SetTheme(theme string) error {
 	s.prefs.mu.Lock()
 	defer s.prefs.mu.Unlock()
 	s.prefs.Theme = theme
+	return s.prefs.save()
+}
+
+// UpdateCheck is the choice made in the app about checking GitHub for new
+// versions, or nil when none was made.
+func (s *Service) UpdateCheck() *bool {
+	s.prefs.mu.Lock()
+	defer s.prefs.mu.Unlock()
+	if s.prefs.UpdateCheck == nil {
+		return nil
+	}
+	on := *s.prefs.UpdateCheck
+	return &on
+}
+
+// SetUpdateCheck chooses whether to check GitHub for new versions.
+func (s *Service) SetUpdateCheck(on bool) error {
+	s.prefs.mu.Lock()
+	defer s.prefs.mu.Unlock()
+	s.prefs.UpdateCheck = &on
 	return s.prefs.save()
 }

@@ -1,0 +1,9 @@
+﻿Privacy
+
+Proto Easy Mount sends information nowhere but to the storage servers you connect it to.
+
+One exception: to find new versions it asks GitHub (api.github.com) for the list of public releases every 6 hours. The request carries no account or file information, though, like any web request, GitHub sees the IP address it comes from. You can turn this off with "Check for new versions" on the next page, or later in the app under 정보 → [업데이트 자동 확인]. With it off, the app only checks when you press [업데이트 확인].
+
+Sign-in details are kept in Windows Credential Manager; settings and logs stay in your user folders on this PC (proto-easy-mount in %APPDATA% and %LOCALAPPDATA%).
+
+If the WinFsp driver needed to mount drives is missing, it is installed too (administrator prompt). Other programs use WinFsp as well, so it stays when this app is uninstalled. Uninstall from Windows Settings → Apps.

@@ -342,3 +342,16 @@ func TestLayoutServerChecking(t *testing.T) {
 		}
 	}
 }
+
+// The switch in the app wins over the installer's choice.
+func TestAutoCheckChoice(t *testing.T) {
+	u := newUI(t, false)
+	u.svc.SetUpdateCheck(false)
+	if u.autoCheck() {
+		t.Fatal("update check on although switched off in the app")
+	}
+	u.svc.SetUpdateCheck(true)
+	if !u.autoCheck() {
+		t.Fatal("update check off although switched on in the app")
+	}
+}

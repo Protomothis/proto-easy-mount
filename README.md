@@ -148,6 +148,27 @@ tools/                    리소스 · 서명 · 서드파티 고지 생성
 2. `init()`에서 `provider.Register`를 부르고, `internal/cli/cli.go`에 빈 import를 더합니다.
 3. 즉시 반영형을 지원하려면 `provider.Instant`도 구현합니다.
 
+## 개인정보
+
+Proto Easy Mount는 사용자가 직접 연결한 저장소 서버 말고는 어디에도 정보를 보내지 않습니다.
+한 가지 예외로, 새 버전을 확인하려고 6시간마다 GitHub(`api.github.com`)에 공개 릴리스 목록을 요청합니다.
+이 요청에는 계정이나 파일 정보가 들어가지 않습니다(여느 웹 요청처럼 GitHub는 IP 주소를 봅니다).
+설치할 때 "새 버전 자동 확인"을 끄거나, 앱의 정보 → [업데이트 자동 확인]에서 끌 수 있습니다.
+
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it, except for the update check described above, which can be turned off during installation and in the app.
+
+## 코드 서명 정책 · Code signing policy
+
+Windows 실행 파일과 설치 파일은 SignPath Foundation의 오픈소스 무료 서명으로 서명합니다(신청 중이며, 승인되기 전 릴리스는 서명이 없습니다).
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- 커밋 · 리뷰 (Committers and reviewers): [Protomothis](https://github.com/Protomothis)
+- 서명 승인 (Approvers): [Protomothis](https://github.com/Protomothis)
+
+서명하는 파일은 이 저장소의 소스에서 GitHub Actions(`.github/workflows/release.yml`)로 빌드한 것뿐입니다.
+설치 파일에 함께 들어 있는 WinFsp 설치 파일은 WinFsp 제작자가 서명한 공식 파일을 그대로 씁니다.
+
 ## 라이선스
 
 [GPL-3.0](LICENSE) © Protomothis

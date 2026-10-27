@@ -1,6 +1,8 @@
 # Builds the Windows binaries and the setup executable into dist\.
-#   powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1 [-Version 0.1.0]
-param([string]$Version)
+#   powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1 [-Version 0.1.0] [-Stage all|binaries|installer]
+# The release workflow runs the stages apart, to code sign the binaries
+# before they are packed and the installer after.
+param([string]$Version, [ValidateSet('all', 'binaries', 'installer')][string]$Stage = 'all')
 
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
@@ -34,22 +36,29 @@ if ((Get-FileHash $winfspMsi -Algorithm SHA256).Hash -ne $winfspSha256) {
     throw "WinFsp installer hash mismatch: $winfspMsi"
 }
 
-# License texts of everything compiled in, shipped with the app.
-Invoke-Checked go @('run', './tools/notices', '-o', 'build\THIRD-PARTY-NOTICES.txt')
+if ($Stage -ne 'installer') {
+    # License texts of everything compiled in, shipped with the app.
+    Invoke-Checked go @('run', './tools/notices', '-o', 'build\THIRD-PARTY-NOTICES.txt')
 
-# Icons, version info and manifest for the executables and the installer.
-Invoke-Checked go @('run', './tools/mkwinres', '-version', $Version, '-assets', 'build')
+    # Icons, version info and manifest for the executables and the installer.
+    Invoke-Checked go @('run', './tools/mkwinres', '-version', $Version, '-assets', 'build')
 
-# rclone reports this in its User-Agent and our log; without it, "-DEV".
-$rcloneVersion = (go list -m -f '{{.Version}}' github.com/rclone/rclone).Trim()
-$env:GOOS = 'windows'
-$env:GOARCH = 'amd64'
-Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
-    '-ldflags', "-s -w -H windowsgui -X main.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
-    '-o', 'dist\proto-easy-mount-app.exe', './cmd/proto-easy-mount-app')
-Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
-    '-ldflags', "-s -w -X github.com/protomothis/proto-easy-mount/internal/cli.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
-    '-o', 'dist\proto-easy-mount.exe', './cmd/proto-easy-mount')
+    # rclone reports this in its User-Agent and our log; without it, "-DEV".
+    $rcloneVersion = (go list -m -f '{{.Version}}' github.com/rclone/rclone).Trim()
+    $env:GOOS = 'windows'
+    $env:GOARCH = 'amd64'
+    Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
+        '-ldflags', "-s -w -H windowsgui -X main.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
+        '-o', 'dist\proto-easy-mount-app.exe', './cmd/proto-easy-mount-app')
+    Invoke-Checked go @('build', '-tags', 'cmount', '-trimpath',
+        '-ldflags', "-s -w -X github.com/protomothis/proto-easy-mount/internal/cli.Version=$Version -X github.com/rclone/rclone/fs.Version=$rcloneVersion",
+        '-o', 'dist\proto-easy-mount.exe', './cmd/proto-easy-mount')
+}
+
+if ($Stage -eq 'binaries') {
+    Get-ChildItem dist | Format-Table Name, Length
+    return
+}
 
 $iscc = $null
 $found = Get-Command iscc.exe -ErrorAction SilentlyContinue

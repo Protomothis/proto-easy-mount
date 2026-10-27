@@ -58,6 +58,29 @@ Windows 빌드는 `cmount` 태그가 있어야 마운트 기능이 들어갑니�
 서명 키는 저장소 시크릿 `UPDATE_SIGNING_KEY`에만 있습니다. 키를 바꾸려면 `go run ./tools/signmanifest genkey`로 새로 만들고
 공개 키를 `internal/release/manifest.go`에 넣은 버전을 먼저 내야 합니다(옛 앱은 그 뒤 버전을 자동으로 받지 못합니다).
 
+## 코드 서명 (SignPath)
+
+[SignPath Foundation](https://signpath.org)의 오픈소스 무료 서명을 씁니다. `release.yml`은 저장소 변수
+`SIGNPATH_ORGANIZATION_ID`가 있을 때만 서명하고, 없으면 지금처럼 서명 없이 릴리스합니다.
+
+1. <https://signpath.org/apply>에서 신청합니다. 조건 요약:
+   - OSI 라이선스(GPL-3.0), 공개 저장소, 이미 릴리스됨(v0.1.0)
+   - README와 릴리스 페이지의 [코드 서명 정책](README.md#코드-서명-정책--code-signing-policy)
+   - 개인정보: 자동 업데이트 확인을 설치 화면과 README에 알리고 끌 수 있게 함(`installer/privacy.*.txt`)
+   - GitHub와 SignPath 계정 모두 2단계 인증
+2. 승인되면 SignPath에서:
+   - 프로젝트 `proto-easy-mount`를 만들고 저장소를 GitHub 신뢰 빌드 시스템으로 연결합니다.
+   - 아티팩트 구성 `binaries` · `installer`에 `.signpath/binaries.xml` · `.signpath/installer.xml` 내용을 넣습니다.
+   - 서명 정책 `release-signing`을 만듭니다(필요하면 `test-signing`도). 요청마다 Approver 승인을 거칩니다.
+3. GitHub 저장소 설정:
+   - 시크릿 `SIGNPATH_API_TOKEN`: SignPath CI 사용자의 API 토큰
+   - 변수 `SIGNPATH_ORGANIZATION_ID`
+   - 선택: `SIGNPATH_PROJECT_SLUG`(기본 `proto-easy-mount`), `SIGNPATH_SIGNING_POLICY`(기본 `release-signing`)
+4. Actions에서 **Build and Release**를 직접 실행(버전 예: `0.1.1-dev.1`)하면 릴리스 없이 빌드 · 서명만 해서 결과를 아티팩트로 받습니다.
+
+순서는 exe 두 개 서명 → 서명된 exe로 설치 파일 생성 → 설치 파일 서명 → `update.json` 서명입니다(해시는 최종 파일 기준).
+제거 프로그램(`unins000.exe`)은 설치할 때 만들어져 서명되지 않습니다.
+
 ## 서드파티 고지
 
 의존성을 바꿨으면 `go run ./tools/notices`로 `THIRD-PARTY-NOTICES.md`를 다시 만듭니다. 설치 파일에는 빌드 때 새로 만든 것이 들어갑니다.
