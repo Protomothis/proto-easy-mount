@@ -17,6 +17,7 @@
 #define AppName "Proto Easy Mount"
 #define AppExe "proto-easy-mount-app.exe"
 #define RunValue "ProtoEasyMount"
+#define AppUserModelID "Protomothis.ProtoEasyMount"
 
 [Setup]
 AppId={{6F0B3C7E-2D4A-4E8B-9C51-7A2E9D4B1F30}
@@ -26,9 +27,13 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisher=Protomothis
 VersionInfoVersion={#AppVersionNumeric}
 VersionInfoProductVersion={#AppVersionNumeric}
-; Per-user install: no admin rights needed, also for updates.
-; Only the WinFsp driver asks for elevation, and only when it is missing.
+; Installs for the current user by default: no admin rights needed, also for
+; updates; only the WinFsp driver asks for elevation, and only when missing.
+; The first page offers installing for all users instead (Program Files,
+; needs admin, and so do its updates). Updates keep the mode chosen first
+; (UsePreviousPrivileges); /ALLUSERS or /CURRENTUSER pick it on the command line.
 PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog commandline
 DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=auto
@@ -71,7 +76,8 @@ english.LaunchApp=Launch Proto Easy Mount
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:TaskDesktop}"; GroupDescription: "{cm:TaskGroup}"; Flags: unchecked
-Name: "autostart"; Description: "{cm:TaskAutostart}"; GroupDescription: "{cm:TaskGroup}"
+; Per user: for an all-users install each person turns it on in the app.
+Name: "autostart"; Description: "{cm:TaskAutostart}"; GroupDescription: "{cm:TaskGroup}"; Check: not IsAdminInstallMode
 
 [Files]
 Source: "..\dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
@@ -81,7 +87,8 @@ Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreve
 Source: "{#WinFspMsi}"; DestName: "winfsp.msi"; Flags: dontcopy
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+; The ID lets Windows show the app's notifications (and group its taskbar button).
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppUserModelID}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
@@ -91,7 +98,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 ; The app's own updater runs setup quietly with /RELAUNCH=1 after quitting.
-Filename: "{app}\{#AppExe}"; Flags: nowait; Check: Relaunch
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: Relaunch
 
 [UninstallRun]
 ; The app keeps running in the tray; stop it so its files can be removed.

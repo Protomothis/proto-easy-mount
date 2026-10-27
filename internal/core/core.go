@@ -65,6 +65,9 @@ const (
 	Connecting
 	Mounted
 	Failed
+	// Suspended: switched off while the server was unreachable; it comes
+	// back by itself once the server answers again.
+	Suspended
 )
 
 // DriveView is a drive together with its mount state.
@@ -112,8 +115,9 @@ type accountState struct {
 	instant bool // the server takes tus uploads (instant mode)
 	loading bool
 	err     string
-	signIn  bool // the session is gone; err asks to sign in again
-	restore bool // remount the drives left connected once the list loads
+	signIn  bool   // the session is gone; err asks to sign in again
+	restore bool   // remount the drives left connected once the list loads
+	health  health // network watch
 }
 
 type mountKey struct{ acct, drive string }
@@ -126,7 +130,9 @@ type mountState struct {
 	// stopping is set when the user asked to unmount, so the waiter
 	// does not report the end of the mount as a failure.
 	stopping bool
-	uploads  int
+	// suspended is set when the network watch switched the drive off.
+	suspended bool
+	uploads   int
 }
 
 // Service is safe for concurrent use.
@@ -142,6 +148,8 @@ type Service struct {
 	mounts    map[mountKey]*mountState
 	listeners []func()
 	activity  Activity
+	// Notify, when set, shows a system notification (network watch).
+	Notify func(title, text string)
 }
 
 // New loads saved accounts. Drive lists are fetched by Refresh.
@@ -514,7 +522,9 @@ func (s *Service) Mount(acctID, driveID string) {
 
 		werr := m.Wait()
 		s.mu.Lock()
-		if ms.stopping || werr == nil {
+		if ms.suspended {
+			ms.state, ms.m = Suspended, nil // keeps target: it comes back there
+		} else if ms.stopping || werr == nil {
 			ms.state, ms.target, ms.m = Idle, "", nil
 		} else {
 			ms.state, ms.err, ms.m = Failed, werr.Error(), nil
@@ -627,9 +637,10 @@ func (s *Service) unmount(acctID, driveID string, forget bool) {
 	ms := s.mounts[k]
 	var m *mount.Mounted
 	if ms != nil {
-		if ms.state == Failed {
-			ms.state, ms.err = Idle, ""
+		if ms.state == Failed || ms.state == Suspended {
+			ms.state, ms.err, ms.target = Idle, "", ""
 		}
+		ms.suspended = false // switched off by hand: stays off
 		m = ms.m
 		ms.stopping = true
 	}

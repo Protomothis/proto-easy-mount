@@ -22,6 +22,11 @@ type Prefs struct {
 	Modes map[string]map[string]Mode `json:"modes,omitempty"`
 	// TestUpdates also offers test versions (vX.Y.Z-rc.N) as updates.
 	TestUpdates bool `json:"test_updates,omitempty"`
+	// Theme is "light" or "dark" when chosen by hand; empty follows the system.
+	Theme string `json:"theme,omitempty"`
+	// KeepMountedOffline leaves drives on while their server is unreachable
+	// (by default they are switched off and back on).
+	KeepMountedOffline bool `json:"keep_mounted_offline,omitempty"`
 
 	path string
 	mu   sync.Mutex
@@ -164,5 +169,21 @@ func (s *Service) SetTestUpdates(on bool) error {
 	s.prefs.mu.Lock()
 	defer s.prefs.mu.Unlock()
 	s.prefs.TestUpdates = on
+	return s.prefs.save()
+}
+
+// Theme is the window theme chosen by hand: "light", "dark", or "" to
+// follow the system setting.
+func (s *Service) Theme() string {
+	s.prefs.mu.Lock()
+	defer s.prefs.mu.Unlock()
+	return s.prefs.Theme
+}
+
+// SetTheme chooses the window theme ("light", "dark" or "" for the system).
+func (s *Service) SetTheme(theme string) error {
+	s.prefs.mu.Lock()
+	defer s.prefs.mu.Unlock()
+	s.prefs.Theme = theme
 	return s.prefs.save()
 }

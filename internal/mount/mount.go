@@ -178,6 +178,10 @@ func Start(ctx context.Context, req Request) (*Mounted, error) {
 	if err != nil {
 		return nil, err
 	}
+	// rclone waits a minute for a connection, per try; with the network gone
+	// Explorer would hang that long on every folder. The backend's HTTP
+	// client takes this when it is created.
+	fs.GetConfig(ctx).ConnectTimeout = fs.Duration(10 * time.Second)
 	f, err := ri.NewFs(ctx, req.Name, req.Remote.Root, configmap.Simple(req.Remote.Options))
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", req.Name, err)

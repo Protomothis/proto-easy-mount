@@ -135,8 +135,8 @@ func (t *Tray) rebuild(accts []core.AccountView, newer string) {
 			systray.AddMenuItem("  불러오는 중…", "").Disable()
 		}
 		for _, d := range a.Drives {
-			item := systray.AddMenuItemCheckbox("  "+DriveLabel(d), "", d.State == core.Mounted || d.State == core.Connecting)
-			acct, drive, mounted := a.ID, d.ID, d.State == core.Mounted || d.State == core.Connecting
+			item := systray.AddMenuItemCheckbox("  "+DriveLabel(d), "", d.State == core.Mounted || d.State == core.Connecting || d.State == core.Suspended)
+			acct, drive, mounted := a.ID, d.ID, d.State == core.Mounted || d.State == core.Connecting || d.State == core.Suspended
 			on(item, func() {
 				if mounted {
 					t.svc.Unmount(acct, drive)
@@ -190,6 +190,8 @@ func DriveLabel(d core.DriveView) string {
 		return name + " (" + d.Target + ")"
 	case core.Failed:
 		return name + " (오류)"
+	case core.Suspended:
+		return name + " (서버 연결 대기)"
 	}
 	return name
 }

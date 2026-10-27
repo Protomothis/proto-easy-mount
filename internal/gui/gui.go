@@ -61,11 +61,13 @@ type UI struct {
 	add       *addFlow
 	addBtn    widget.Clickable
 	autoStart widget.Bool
+	suspendSw widget.Bool // 네트워크가 끊기면 드라이브 잠시 끄기
 	autoErr   string
 	showAdd   bool
 	quitBtn   widget.Clickable
 	logBtn    widget.Clickable
-	dark      bool      // palette in use
+	dark      bool // palette in use
+	themeW    themeWidgets
 	quitArmed time.Time // first click while drives are mounted only arms the button
 	accts     map[string]*acctWidgets
 	drives    map[string]*driveWidgets
@@ -176,7 +178,7 @@ func (u *UI) loop(w *app.Window) {
 			u.mu.Unlock()
 			return
 		case app.FrameEvent:
-			if d := sysDark.Load(); d != u.dark {
+			if d := u.wantDark(sysDark.Load()); d != u.dark {
 				u.setDark(d)
 				darkTitleBar(hwnd, d)
 			}
@@ -495,7 +497,7 @@ func (u *UI) driveRow(gtx C, acctID string, d core.DriveView) D {
 		dw = &driveWidgets{}
 		u.drives[key] = dw
 	}
-	on := d.State == core.Mounted || d.State == core.Connecting
+	on := d.State == core.Mounted || d.State == core.Connecting || d.State == core.Suspended
 	if dw.sw.Update(gtx) {
 		if dw.sw.Value {
 			u.svc.Mount(acctID, d.ID)
@@ -558,6 +560,8 @@ func (u *UI) driveRow(gtx C, acctID string, d core.DriveView) D {
 		}
 	case core.Failed:
 		status, col = "오류: "+d.Err, colDanger
+	case core.Suspended:
+		status, col = "서버 응답 없음 · 돌아오면 다시 켜요", colDanger
 	}
 
 	row := func(gtx C) D {
@@ -718,6 +722,8 @@ func (u *UI) settings(gtx C) D {
 		if u.autoErr != "" {
 			children = append(children, vspace(8), layout.Rigid(label(u.th, 12, u.autoErr, colDanger, font.Normal).Layout))
 		}
+		children = append(children, vspace(16), layout.Rigid(u.suspendRow))
+		children = append(children, vspace(16), layout.Rigid(u.themeRow))
 		children = append(children,
 			vspace(16),
 			layout.Rigid(func(gtx C) D { return u.footer(gtx) }),

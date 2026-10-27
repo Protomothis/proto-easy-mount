@@ -21,6 +21,7 @@ import (
 	"github.com/protomothis/proto-easy-mount/internal/gui"
 	"github.com/protomothis/proto-easy-mount/internal/instance"
 	"github.com/protomothis/proto-easy-mount/internal/mount"
+	"github.com/protomothis/proto-easy-mount/internal/notify"
 	"github.com/protomothis/proto-easy-mount/internal/store"
 	"github.com/protomothis/proto-easy-mount/internal/tray"
 	"github.com/protomothis/proto-easy-mount/internal/update"
@@ -57,10 +58,12 @@ func main() {
 	mount.LogToFile(store.LogPath(st))
 	slog.Info(fmt.Sprintf("Proto Easy Mount %s 시작 (%s/%s, rclone %s, background=%v)",
 		Version, runtime.GOOS, runtime.GOARCH, mount.RcloneVersion(), background))
+	notify.UseAppID() // before any window: taskbar grouping and notifications
 	svc, err := core.New(st, core.Env(browser.Open))
 	if err != nil {
 		fatal(err)
 	}
+	svc.Notify = notify.Show
 	u := gui.New(svc, Version, systray.Quit)
 	u.LogPath = store.LogPath(st)
 	ui.Store(u)

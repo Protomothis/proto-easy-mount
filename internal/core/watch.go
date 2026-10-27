@@ -33,6 +33,7 @@ func (s *Service) Watch(ctx context.Context) {
 	defer tick.Stop()
 
 	lastRefresh, lastRetry := time.Now(), time.Now()
+	var lastProbe time.Time
 	lastChanges := mount.Changes()
 	var due []time.Time // quota re-reads scheduled after a change
 	for {
@@ -40,6 +41,10 @@ func (s *Service) Watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
+			if now.Sub(lastProbe) >= probeEvery {
+				lastProbe = now
+				s.watchNetwork(ctx)
+			}
 			changed := s.sample(mount.Transfers())
 			if n := mount.Changes(); n != lastChanges {
 				lastChanges, changed = n, true

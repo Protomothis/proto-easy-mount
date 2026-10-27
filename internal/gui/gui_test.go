@@ -300,3 +300,25 @@ func TestLayoutAboutUpdate(t *testing.T) {
 		t.Fatal("tray would not see the update")
 	}
 }
+
+// The theme chosen by hand wins over the system setting and is kept.
+func TestThemeChoice(t *testing.T) {
+	u := newUI(t, false)
+	if u.wantDark(false) || !u.wantDark(true) {
+		t.Fatal("default must follow the system")
+	}
+	render(t, u, "") // create the buttons
+	u.themeW.btns[2].Click()
+	render(t, u, "")
+	if u.svc.Theme() != "dark" || !u.wantDark(false) {
+		t.Fatalf("after 어둡게: theme %q", u.svc.Theme())
+	}
+	u.themeW.btns[1].Click()
+	render(t, u, "")
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "settings", u.settings)
+	}
+	if u.wantDark(true) {
+		t.Fatal("밝게 must ignore a dark system")
+	}
+}
