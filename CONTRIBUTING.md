@@ -60,12 +60,14 @@ Windows 빌드는 `cmount` 태그가 있어야 마운트 기능이 들어갑니�
 
 ## 코드 서명 (SignPath)
 
-[SignPath Foundation](https://signpath.org)의 오픈소스 무료 서명을 씁니다. `release.yml`은 저장소 변수
+> 보류 중입니다(#10). 프로젝트가 더 자리 잡으면 신청하고, 그때 README에 코드 서명 정책(팀 역할, SignPath 문구)을 다시 넣습니다.
+
+[SignPath Foundation](https://signpath.org)의 오픈소스 무료 서명을 쓸 예정입니다. `release.yml`은 저장소 변수
 `SIGNPATH_ORGANIZATION_ID`가 있을 때만 서명하고, 없으면 지금처럼 서명 없이 릴리스합니다.
 
 1. <https://signpath.org/apply>에서 신청합니다. 조건 요약:
    - OSI 라이선스(GPL-3.0), 공개 저장소, 이미 릴리스됨(v0.1.0)
-   - README와 릴리스 페이지의 [코드 서명 정책](README.md#코드-서명-정책--code-signing-policy)
+   - README와 릴리스 페이지에 코드 서명 정책: "Free code signing provided by SignPath.io, certificate by SignPath Foundation", 팀 역할(Committers and reviewers · Approvers: Protomothis)
    - 개인정보: 자동 업데이트 확인을 설치 화면과 README에 알리고 끌 수 있게 함(`installer/privacy.*.txt`)
    - GitHub와 SignPath 계정 모두 2단계 인증
 2. 승인되면 SignPath에서:

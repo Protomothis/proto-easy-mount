@@ -158,16 +158,11 @@ Proto Easy Mount는 사용자가 직접 연결한 저장소 서버 말고는 어
 
 This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it, except for the update check described above, which can be turned off during installation and in the app.
 
-## 코드 서명 정책 · Code signing policy
+## 코드 서명
 
-Windows 실행 파일과 설치 파일은 SignPath Foundation의 오픈소스 무료 서명으로 서명합니다(신청 중이며, 승인되기 전 릴리스는 서명이 없습니다).
-
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
-
-- 커밋 · 리뷰 (Committers and reviewers): [Protomothis](https://github.com/Protomothis)
-- 서명 승인 (Approvers): [Protomothis](https://github.com/Protomothis)
-
-서명하는 파일은 이 저장소의 소스에서 GitHub Actions(`.github/workflows/release.yml`)로 빌드한 것뿐입니다.
+아직 실행 파일과 설치 파일에 코드 서명이 없어, 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다.
+릴리스 파일은 모두 이 저장소의 소스에서 GitHub Actions(`.github/workflows/release.yml`)로 빌드한 것이고,
+앱의 자동 업데이트는 릴리스에 붙은 서명된 `update.json`으로 설치 파일의 해시를 확인한 뒤에만 설치합니다.
 WinFsp는 설치 파일에 넣지 않습니다. 필요할 때 WinFsp 제작자가 서명한 공식 설치 파일을 GitHub에서 받아(고정 버전, SHA-256 확인) 그대로 실행합니다.
 
 ## 라이선스
