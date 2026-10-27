@@ -30,7 +30,12 @@ import (
 
 type fakeProvider struct{}
 
-func init() { provider.Register(fakeProvider{}) }
+func init() {
+	provider.Register(fakeProvider{})
+	// Screens assume the driver is there, as on a set-up PC; CI machines lack
+	// WinFsp. TestDriverSetupFirst covers the missing case.
+	winfspInstalled = func() bool { return true }
+}
 
 func (fakeProvider) Name() string               { return "fake" }
 func (fakeProvider) Title() string              { return "예시 서비스" }
