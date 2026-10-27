@@ -54,7 +54,7 @@ func (fakeProvider) Drives(context.Context, provider.Account, provider.Secret) (
 		{ID: "sh", Name: "Shares", Kind: provider.KindShares},
 	}, nil
 }
-func (fakeProvider) Remote(provider.Env, provider.Account, provider.Drive) (provider.Remote, error) {
+func (fakeProvider) Remote(provider.Env, provider.Account, provider.Secret, provider.Drive) (provider.Remote, error) {
 	return provider.Remote{}, nil
 }
 
@@ -398,5 +398,32 @@ func TestDriverSetupFirst(t *testing.T) {
 	u.driver.mu.Unlock()
 	if !u.driverReady(layout.Context{Ops: new(op.Ops)}) {
 		t.Fatal("still asking for WinFsp after installing it")
+	}
+}
+
+// Password providers ask for an account here, masked, and say 로그인
+// instead of sending the person to the browser.
+func TestPasswordProviderStep(t *testing.T) {
+	u := newUI(t, false)
+	p, err := provider.Get("webdav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !passwordLogin(p) {
+		t.Fatal("webdav not seen as a password login")
+	}
+	if nc, _ := provider.Get("nextcloud"); passwordLogin(nc) {
+		t.Fatal("nextcloud signs in through the browser")
+	}
+	u.add.prefill(p, "https://nas.example.com:5006/home", map[string]string{"user": "alice"})
+	u.add.optEditor("webdav/password").SetText("secret")
+	render(t, u, "")
+	if m := u.add.optEditor("webdav/password").Mask; m == 0 {
+		t.Fatal("password not masked")
+	}
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "add-webdav", func(gtx C) D { return u.add.layout(gtx, true) })
+		u.add.reset()
+		shot(t, u, dir, "add-pick", func(gtx C) D { return u.add.layout(gtx, true) })
 	}
 }

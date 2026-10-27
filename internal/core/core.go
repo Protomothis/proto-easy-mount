@@ -19,7 +19,9 @@ import (
 	"github.com/protomothis/proto-easy-mount/internal/store"
 
 	// registered providers
+	_ "github.com/protomothis/proto-easy-mount/internal/provider/nextcloud"
 	_ "github.com/protomothis/proto-easy-mount/internal/provider/opencloud"
+	_ "github.com/protomothis/proto-easy-mount/internal/provider/webdav"
 )
 
 // Env builds the provider environment. The token command re-runs this
@@ -565,10 +567,11 @@ func (s *Service) mount(acctID, driveID string, resume bool) {
 func (s *Service) start(as *accountState, d provider.Drive) (*mount.Mounted, error) {
 	ctx := context.Background()
 	// Fail early with a clear message if the session is gone.
-	if _, err := s.store.FreshSecret(ctx, as.acct, as.prov); err != nil {
+	sec, err := s.store.FreshSecret(ctx, as.acct, as.prov)
+	if err != nil {
 		return nil, sessionError(err)
 	}
-	r, err := as.prov.Remote(s.env, as.acct, d)
+	r, err := as.prov.Remote(s.env, as.acct, sec, d)
 	if err != nil {
 		return nil, err
 	}

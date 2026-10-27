@@ -310,10 +310,16 @@ func (f *addFlow) addressLayout(gtx C, closable bool) D {
 		}
 	}
 
+	pw := passwordLogin(f.prov)
+	intro, button, waiting := "서버 주소를 넣고 브라우저에서 로그인하면 끝이에요.", "브라우저로 로그인", "브라우저에서 로그인을 마쳐 주세요…"
+	if pw {
+		intro, button, waiting = "서버 주소와 계정을 넣고 로그인하세요.", "로그인", "로그인하는 중…"
+	}
+
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx C) D { return f.heading(gtx, f.prov.Title()+" 연결", 2, true, closable) }),
 		vspace(4),
-		layout.Rigid(label(th, 13, "서버 주소를 넣고 브라우저에서 로그인하면 끝이에요.", colSub, font.Normal).Layout),
+		layout.Rigid(label(th, 13, intro, colSub, font.Normal).Layout),
 		vspace(2),
 		layout.Rigid(label(th, 13, "IP 주소나 내부 주소로 넣어도 괜찮아요.", colSub, font.Normal).Layout),
 		vspace(14),
@@ -349,11 +355,11 @@ func (f *addFlow) addressLayout(gtx C, closable bool) D {
 		children = append(children, layout.Rigid(f.status("서버를 확인하는 중…", "")))
 	case signingIn:
 		host := strings.TrimPrefix(strings.TrimPrefix(srv.URL, "https://"), "http://")
-		children = append(children, layout.Rigid(f.status("브라우저에서 로그인을 마쳐 주세요…", host+" · "+srv.Product)))
+		children = append(children, layout.Rigid(f.status(waiting, host+" · "+srv.Product)))
 	default:
 		children = append(children, layout.Rigid(func(gtx C) D {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return primaryButton(th, &f.login, "브라우저로 로그인").Layout(gtx)
+			return primaryButton(th, &f.login, button).Layout(gtx)
 		}))
 	}
 
@@ -373,9 +379,34 @@ func (f *addFlow) addressLayout(gtx C, closable bool) D {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
+// passwordLogin reports whether the provider signs in with a password typed
+// here rather than in the browser.
+func passwordLogin(p provider.Provider) bool {
+	for _, o := range p.Options() {
+		if o.Secret && !o.Advanced {
+			return true
+		}
+	}
+	return false
+}
+
+// prefill opens the address step of p with the address and options filled
+// in, to sign in again where only the person can (a changed password).
+func (f *addFlow) prefill(p provider.Provider, address string, values map[string]string) {
+	f.reset()
+	f.step, f.prov = 1, p
+	f.address.SetText(address)
+	for k, v := range values {
+		f.optEditor(p.Name() + "/" + k).SetText(v)
+	}
+}
+
 func (f *addFlow) optionField(o provider.Option) layout.Widget {
 	th := f.u.th
 	ed := f.optEditor(f.prov.Name() + "/" + o.Key)
+	if o.Secret {
+		ed.Mask = '•'
+	}
 	return func(gtx C) D {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(label(th, 12, o.Label, colSub, font.Medium).Layout),

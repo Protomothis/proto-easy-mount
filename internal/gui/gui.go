@@ -443,6 +443,12 @@ func (u *UI) account(gtx C, a core.AccountView) D {
 	if aw.refresh.Clicked(gtx) && !a.Loading {
 		go u.svc.Refresh(context.Background(), a.ID)
 	}
+	if p, err := provider.Get(a.Provider); err == nil && passwordLogin(p) && aw.signIn.Clicked(gtx) {
+		// only the person knows the new password: open the sign-in step
+		// filled in; signing in replaces this account in place
+		u.add.prefill(p, a.Server, map[string]string{"user": a.User})
+		u.showAdd = true
+	}
 	if aw.signIn.Clicked(gtx) && !aw.signingIn.Load() {
 		aw.signingIn.Store(true)
 		go func() {

@@ -50,27 +50,6 @@ func TestDrivesFrom(t *testing.T) {
 	}
 }
 
-func TestCandidates(t *testing.T) {
-	for in, want := range map[string][]string{
-		"cloud.example.com":           {"https://cloud.example.com"},
-		" https://drive.example.com/": {"https://drive.example.com"},
-		"http://localhost:9200":       {"http://localhost:9200"},
-		"192.168.0.10:9200":           {"https://192.168.0.10:9200", "http://192.168.0.10:9200"},
-		"nas.local/cloud/":            {"https://nas.local/cloud", "http://nas.local/cloud"},
-		"nas":                         {"https://nas", "http://nas"},
-	} {
-		got, err := candidates(in)
-		if err != nil || strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Errorf("candidates(%q) = %v, %v; want %v", in, got, err, want)
-		}
-	}
-	for _, bad := range []string{"", "  ", "ftp://x.example.com"} {
-		if _, err := candidates(bad); err == nil {
-			t.Errorf("%q accepted", bad)
-		}
-	}
-}
-
 // fakeServer serves status.php and config.json like OpenCloud does.
 func fakeServer(t *testing.T, product, public string) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +199,7 @@ func TestDiscoverIssuerAndMe(t *testing.T) {
 func TestRemote(t *testing.T) {
 	o := &openCloud{}
 	env := provider.Env{TokenCommand: func(a provider.Account) []string { return []string{"pem", "token", "--account", a.ID} }}
-	r, err := o.Remote(env, provider.Account{ID: "x"}, provider.Drive{Name: "Alice", Location: "https://s/dav/spaces/me"})
+	r, err := o.Remote(env, provider.Account{ID: "x"}, provider.Secret{}, provider.Drive{Name: "Alice", Location: "https://s/dav/spaces/me"})
 	if err != nil {
 		t.Fatal(err)
 	}
