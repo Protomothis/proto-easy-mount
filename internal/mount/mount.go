@@ -89,6 +89,10 @@ type Transfer struct {
 	Percent int
 	Speed   int64 // smoothed, bytes per second
 	Instant bool  // sent while being copied (instant mode), not from the write cache
+	// Checking: all data is on the server, which is finishing the file;
+	// Left estimates how long that still takes (0 if unknown).
+	Checking bool
+	Left     time.Duration
 }
 
 // Transfers lists what all mounts are moving right now, sorted by name.
@@ -104,7 +108,7 @@ func Transfers() []Transfer {
 		if s.Size > 0 {
 			pct = int(s.Sent * 100 / s.Size)
 		}
-		out = append(out, Transfer{Name: s.Name, Up: true, Percent: pct, Speed: s.Speed, Instant: true})
+		out = append(out, Transfer{Name: s.Name, Up: true, Percent: pct, Speed: s.Speed, Instant: true, Checking: s.Waiting, Left: s.Left})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

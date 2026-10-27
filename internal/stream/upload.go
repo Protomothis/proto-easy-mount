@@ -86,11 +86,12 @@ type Upload struct {
 
 	mu        sync.Mutex
 	cond      *sync.Cond
-	filled    spans  // byte ranges written so far
-	inflight  []span // writes copying into the shadow right now
-	readPos   int64  // how far the sender has consumed the shadow
-	sent      int64  // bytes the server acknowledged
-	failed    error  // sending gave up; the shadow is still complete
+	filled    spans     // byte ranges written so far
+	inflight  []span    // writes copying into the shadow right now
+	readPos   int64     // how far the sender has consumed the shadow
+	sent      int64     // bytes the server acknowledged
+	sentAt    time.Time // when the last byte went out; the server then finishes
+	failed    error     // sending gave up; the shadow is still complete
 	aborted   bool
 	committed bool          // the server-side upload exists and sending runs
 	done      chan struct{} // closed when sending ends, successfully or not
@@ -260,6 +261,9 @@ func (u *Upload) Status() Status {
 		st.Speed = int64(float64(u.readPos) / s)
 	}
 	st.Waiting = u.readPos >= u.size && u.sent < u.size
+	if st.Waiting && !u.sentAt.IsZero() {
+		st.Left = finishLeft(u.size, u.sentAt)
+	}
 	return st
 }
 
@@ -330,6 +334,9 @@ func (u *Upload) send(target string) {
 				break
 			}
 			slog.Warn(fmt.Sprintf("업로드 재시도 %s @%d (%d/%d): %v", u.name, off, try, u.cfg.Tries, err))
+			u.mu.Lock()
+			u.sentAt = time.Time{} // a resend would skew what the server's finish takes
+			u.mu.Unlock()
 			time.Sleep(retryDelay(try))
 			if got, oerr := u.cfg.Client.Offset(ctx, target); oerr == nil {
 				off = got
@@ -350,6 +357,9 @@ func (u *Upload) send(target string) {
 		}
 		u.mu.Lock()
 		u.sent = off
+		if off >= u.size && !u.sentAt.IsZero() {
+			learnFinish(u.size, time.Since(u.sentAt))
+		}
 		u.cond.Broadcast()
 		u.mu.Unlock()
 	}
@@ -386,7 +396,10 @@ func (r *prefixReader) Read(p []byte) (int, error) {
 	avail := min(u.claimable(r.pos, r.end)-r.pos, int64(len(p)))
 	if r.pos+avail > u.readPos {
 		u.readPos = r.pos + avail // writes below this are no longer allowed
-		u.cond.Broadcast()        // writers held by the window may go on
+		if u.readPos == u.size && u.sentAt.IsZero() {
+			u.sentAt = time.Now()
+		}
+		u.cond.Broadcast() // writers held by the window may go on
 	}
 	u.mu.Unlock()
 

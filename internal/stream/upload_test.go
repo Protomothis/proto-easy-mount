@@ -253,3 +253,37 @@ func TestHeldWritesDontWait(t *testing.T) {
 		t.Fatalf("upload = %+v", got)
 	}
 }
+
+// While the server finishes a fully sent file, Status says so with an
+// estimate, and the time it took is learned for the next estimate.
+func TestFinishEstimate(t *testing.T) {
+	old := learnFrom
+	learnFrom = 0
+	defer func() { learnFrom = old }()
+	finishRate.rate, finishRate.learned = defaultFinishRate, false
+
+	fake := &tustest.FakeServer{Finish: 300 * time.Millisecond}
+	cfg, coll := setup(t, fake, 0, 1<<20)
+	const size = 1 << 20
+	u, err := Start(context.Background(), cfg, coll, "big.bin", size, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Close()
+	u.WriteAt(randomBytes(size), 0)
+	deadline := time.Now().Add(5 * time.Second)
+	for !u.Status().Waiting && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !u.Status().Waiting {
+		t.Fatal("never reported waiting for the server")
+	}
+	waitOK(t, u)
+	// learned: 1 MB in ~0.3 s, far slower than the 100 MB/s default
+	if r := finishRate.rate; r > 10<<20 {
+		t.Fatalf("finish rate %.0f B/s not learned", r)
+	}
+	if left := finishLeft(size, time.Now()); left < 200*time.Millisecond || left > time.Second {
+		t.Fatalf("estimate after learning = %v", left)
+	}
+}

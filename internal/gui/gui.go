@@ -302,14 +302,17 @@ func (u *UI) activityBar(gtx C) D {
 	title, note := "내려받는 중", ""
 	if act.Uploads > 0 {
 		title = fmt.Sprintf("서버로 올리는 중 · %d개 남음", act.Uploads)
-		instant := 0
+		instant, checking := 0, false
 		for _, f := range act.Files {
 			if f.Instant {
 				instant++
 			}
+			checking = checking || f.Checking
 		}
 		if act.Uploads > instant {
 			note = "탐색기 복사는 끝났어요. 업로드가 끝날 때까지 앱을 끄지 마세요."
+		} else if checking {
+			note = "서버가 받은 파일을 확인하는 동안 탐색기는 99%에서 기다려요."
 		} else {
 			note = "탐색기 복사가 끝나면 서버에도 저장된 거예요."
 		}
@@ -345,8 +348,14 @@ func (u *UI) activityBar(gtx C) D {
 	})
 }
 
-// fileProgress is one upload: name and percent over a thin meter.
+// fileProgress is one upload: name and percent over a thin meter. Once all
+// data is sent the server still finishes the file (Explorer sits at 99%
+// meanwhile), so that wait gets its own words and time.
 func (u *UI) fileProgress(gtx C, f mount.Transfer) D {
+	state, stateCol, frac := fmt.Sprintf("%d%%", f.Percent), colSub, float64(f.Percent)/100
+	if f.Checking {
+		state, stateCol, frac = "서버 확인 중"+aboutLeft(f.Left), colAccent, 1
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -356,12 +365,25 @@ func (u *UI) fileProgress(gtx C, f mount.Transfer) D {
 					return l.Layout(gtx)
 				}),
 				hspace(8),
-				layout.Rigid(label(u.th, 12, fmt.Sprintf("%d%%", f.Percent), colSub, font.Medium).Layout),
+				layout.Rigid(label(u.th, 12, state, stateCol, font.Medium).Layout),
 			)
 		}),
 		vspace(4),
-		layout.Rigid(func(gtx C) D { return usageBar(gtx, float64(f.Percent)/100, colAccent) }),
+		layout.Rigid(func(gtx C) D { return usageBar(gtx, frac, colAccent) }),
 	)
+}
+
+// aboutLeft words an estimated wait: " · 약 50초", " · 약 3분", or "…"
+// when the estimate has run out.
+func aboutLeft(d time.Duration) string {
+	switch s := int(d.Round(time.Second) / time.Second); {
+	case s <= 0:
+		return "…"
+	case s < 90:
+		return fmt.Sprintf(" · 약 %d초", s)
+	default:
+		return fmt.Sprintf(" · 약 %d분", (s+30)/60)
+	}
 }
 
 func (u *UI) active() bool {

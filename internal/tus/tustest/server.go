@@ -22,6 +22,9 @@ type FakeServer struct {
 	FailPatch func(offset int64) bool
 	// OnPatch runs before a PATCH body is read (to observe or slow it).
 	OnPatch func(offset int64)
+	// Finish, when set, is how long the server takes after the last byte
+	// before it answers (OpenCloud computes checksums then).
+	Finish time.Duration
 	// SlowRead, when set, pauses after every 64 KB of PATCH body read,
 	// to stand in for a server slower than the client.
 	SlowRead time.Duration
@@ -123,6 +126,9 @@ func (s *FakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		u.Data = append(u.Data, b...)
 		n := len(u.Data)
 		s.mu.Unlock()
+		if s.Finish > 0 && int64(n) == u.Size {
+			time.Sleep(s.Finish)
+		}
 		w.Header().Set("Upload-Offset", strconv.Itoa(n))
 		w.WriteHeader(http.StatusNoContent)
 	default:

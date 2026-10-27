@@ -322,3 +322,23 @@ func TestThemeChoice(t *testing.T) {
 		t.Fatal("밝게 must ignore a dark system")
 	}
 }
+
+// A file whose data is all on the server says it is being checked, with
+// the time left, instead of sitting at 99%.
+func TestLayoutServerChecking(t *testing.T) {
+	u := newUI(t, true)
+	u.activity = func() core.Activity {
+		return core.Activity{Uploads: 1, Files: []mount.Transfer{
+			{Name: "big.zip", Up: true, Percent: 99, Instant: true, Checking: true, Left: 48 * time.Second},
+		}}
+	}
+	render(t, u, "")
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "checking", u.activityBar)
+	}
+	for d, want := range map[time.Duration]string{0: "…", 48 * time.Second: " · 약 48초", 200 * time.Second: " · 약 3분"} {
+		if got := aboutLeft(d); got != want {
+			t.Errorf("aboutLeft(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
