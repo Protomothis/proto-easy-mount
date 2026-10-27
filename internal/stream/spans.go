@@ -3,6 +3,7 @@ package stream
 import (
 	"sort"
 	"sync"
+	"time"
 )
 
 // spans is a set of written byte ranges, kept sorted and merged.
@@ -61,7 +62,8 @@ type Status struct {
 	Name       string
 	Sent, Size int64
 	Speed      int64
-	Waiting    bool // all data sent; the server is finishing (checksums)
+	Waiting    bool          // all data sent; the server is finishing (checksums)
+	Left       time.Duration // while Waiting: estimated time to the server's answer, 0 if unknown
 }
 
 // Active lists live uploads.

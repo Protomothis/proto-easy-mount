@@ -4,18 +4,33 @@ name: Build and Release
 # GitHub release whose notes are the tag's CHANGELOG.md section.
 # v1.2.3 is a release (Latest, offered to every app); v1.2.3-rc.1 is a
 # prerelease, offered only to apps with "테스트 버전도 받기" on.
+#
+# Code signing (SignPath Foundation, free for open source): when the
+# repository variable SIGNPATH_ORGANIZATION_ID is set, the two exes are
+# signed before the installer packs them, and the installer after it is
+# built. Without it everything else runs as before, unsigned.
+# Running the workflow by hand builds (and signs) without releasing, to try
+# the signing setup; the files come back as a workflow artifact.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, without the v (e.g. 0.1.1-dev.1)'
+        required: true
 
 permissions:
   contents: write
+  actions: read # the SignPath connector downloads the uploaded artifacts
 
 # Pure Go on Windows (cgofuse loads WinFsp at run time, Gio needs no cgo).
 # The runner has gcc, which would switch cgofuse to its C build.
 env:
   CGO_ENABLED: '0'
+  TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
+  SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
 
 jobs:
   release:
@@ -54,31 +69,109 @@ jobs:
             choco install innosetup -y --no-progress
           }
 
-      - name: Build installer
+      - name: Build binaries
         shell: pwsh
         run: |
-          $version = '${{ github.ref_name }}'.TrimStart('v')
-          ./scripts/build-windows.ps1 -Version $version
+          $version = $env:TAG.TrimStart('v')
+          ./scripts/build-windows.ps1 -Version $version -Stage binaries
+          "VERSION=$version" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "INSTALLER=dist/ProtoEasyMount-Setup-$version.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      # SignPath signs what it receives as a GitHub artifact: a zip with the
+      # two exes at its root (artifact configuration "binaries",
+      # .signpath/binaries.xml). A release-signing request waits for an
+      # approver in SignPath.
+      - name: Upload binaries for signing
+        if: env.SIGN == 'true'
+        id: unsigned-binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-binaries
+          path: |
+            dist/proto-easy-mount-app.exe
+            dist/proto-easy-mount.exe
+          if-no-files-found: error
+
+      - name: Sign binaries
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'proto-easy-mount' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
+          artifact-configuration-slug: binaries
+          github-artifact-id: ${{ steps.unsigned-binaries.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/binaries
+
+      - name: Use signed binaries
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: Copy-Item signed/binaries/*.exe dist/ -Force
+
+      - name: Build installer
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Version $env:VERSION -Stage installer
+
+      - name: Upload installer for signing
+        if: env.SIGN == 'true'
+        id: unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: ${{ env.INSTALLER }}
+          if-no-files-found: error
+
+      - name: Sign installer
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'proto-easy-mount' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/installer
+
+      - name: Use signed installer
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: Copy-Item signed/installer/*.exe dist/ -Force
 
       # The app installs an update only when update.json verifies against
       # the ed25519 key embedded in internal/release and the installer's
-      # hash matches. The seed lives only in the UPDATE_SIGNING_KEY secret.
+      # hash matches. Signed after code signing, so the hash is the final one.
+      # The seed lives only in the UPDATE_SIGNING_KEY secret.
       - name: Sign update manifest
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
-        run: go run ./tools/signmanifest sign -key env:UPDATE_SIGNING_KEY -version ${{ github.ref_name }} -arch amd64 -out update.json ${{ env.INSTALLER }}
+        run: go run ./tools/signmanifest sign -key env:UPDATE_SIGNING_KEY -version ${{ env.TAG }} -arch amd64 -out update.json ${{ env.INSTALLER }}
 
       # Fails when the secret and the embedded public key don't match.
       - name: Verify update manifest
         run: go run ./tools/signmanifest verify update.json update.json.sig
 
+      - name: Keep the build (manual run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ env.VERSION }}
+          path: |
+            ${{ env.INSTALLER }}
+            dist/proto-easy-mount.exe
+            update.json
+            update.json.sig
+
       # The tag's CHANGELOG.md section; an rc without its own section gets
       # [Unreleased], what it is a candidate for.
       - name: Extract release notes
+        if: github.event_name == 'push'
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
+          $tag = $env:TAG
           $content = Get-Content CHANGELOG.md -Raw
           $match = [regex]::Match($content, "(?s)## \[$([regex]::Escape($tag))\].*?(?=## \[|$)")
           if (-not $match.Success -and $tag.Contains('-')) {
@@ -86,10 +179,15 @@ jobs:
           }
           $notes = $match.Value
           if (-not $match.Success) { $notes = "_CHANGELOG.md에 [$tag] 항목이 없습니다._" }
-          $notes = $notes.TrimEnd() + "`n`n---`n도움이 됐다면 ⭐ Star나 [GitHub Sponsors](https://github.com/sponsors/Protomothis)로 응원해 주세요.`n"
-          $notes | Out-File -FilePath release_notes.txt -Encoding utf8
+          $footer = "`n`n---`n"
+          if ($env:SIGN -eq 'true') {
+            $footer += "Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org). [코드 서명 정책](https://github.com/Protomothis/proto-easy-mount#코드-서명-정책--code-signing-policy)`n`n"
+          }
+          $footer += "도움이 됐다면 ⭐ Star나 [GitHub Sponsors](https://github.com/sponsors/Protomothis)로 응원해 주세요.`n"
+          ($notes.TrimEnd() + $footer) | Out-File -FilePath release_notes.txt -Encoding utf8
 
       - name: Create release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -98,5 +196,5 @@ jobs:
             update.json
             update.json.sig
           body_path: release_notes.txt
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ !contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          make_latest: ${{ !contains(env.TAG, '-') }}

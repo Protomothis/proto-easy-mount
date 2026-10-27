@@ -89,6 +89,10 @@ type Transfer struct {
 	Percent int
 	Speed   int64 // smoothed, bytes per second
 	Instant bool  // sent while being copied (instant mode), not from the write cache
+	// Checking: all data is on the server, which is finishing the file;
+	// Left estimates how long that still takes (0 if unknown).
+	Checking bool
+	Left     time.Duration
 }
 
 // Transfers lists what all mounts are moving right now, sorted by name.
@@ -104,7 +108,7 @@ func Transfers() []Transfer {
 		if s.Size > 0 {
 			pct = int(s.Sent * 100 / s.Size)
 		}
-		out = append(out, Transfer{Name: s.Name, Up: true, Percent: pct, Speed: s.Speed, Instant: true})
+		out = append(out, Transfer{Name: s.Name, Up: true, Percent: pct, Speed: s.Speed, Instant: true, Checking: s.Waiting, Left: s.Left})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -178,6 +182,10 @@ func Start(ctx context.Context, req Request) (*Mounted, error) {
 	if err != nil {
 		return nil, err
 	}
+	// rclone waits a minute for a connection, per try; with the network gone
+	// Explorer would hang that long on every folder. The backend's HTTP
+	// client takes this when it is created.
+	fs.GetConfig(ctx).ConnectTimeout = fs.Duration(10 * time.Second)
 	f, err := ri.NewFs(ctx, req.Name, req.Remote.Root, configmap.Simple(req.Remote.Options))
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", req.Name, err)

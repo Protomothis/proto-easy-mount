@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/protomothis/proto-easy-mount/internal/auth/oidcflow"
 	"github.com/protomothis/proto-easy-mount/internal/provider"
+	"github.com/protomothis/proto-easy-mount/internal/provider/webaddr"
 )
 
 // knownClients maps server hosts to a native OIDC client registered for
@@ -145,7 +145,7 @@ func isOpenCloud(name string) bool {
 }
 
 func (o *openCloud) Resolve(ctx context.Context, input string) (provider.Server, error) {
-	bases, err := candidates(input)
+	bases, err := webaddr.Candidates(input)
 	if err != nil {
 		return provider.Server{}, err
 	}
@@ -175,41 +175,6 @@ func (o *openCloud) Resolve(ctx context.Context, input string) (provider.Server,
 		return provider.Server{URL: canon, Product: st.product()}, nil
 	}
 	return provider.Server{}, provider.Explain("이 주소에서 OpenCloud 서버를 찾지 못했어요.", "주소를 다시 확인해 주세요.", lastErr)
-}
-
-// candidates lists the base URLs worth trying for what the user typed.
-// Without a scheme HTTPS comes first; plain HTTP is tried too for
-// addresses that only make sense on a local network.
-func candidates(input string) ([]string, error) {
-	s := strings.TrimSpace(input)
-	if s == "" {
-		return nil, provider.Explain("서버 주소를 입력해 주세요.", "", nil)
-	}
-	explicit := strings.Contains(s, "://")
-	if !explicit {
-		s = "https://" + s
-	}
-	u, err := url.Parse(s)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, provider.Explain("주소 형식이 올바르지 않아요.", "예: cloud.example.com", err)
-	}
-	base := u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/")
-	if explicit || !isLocalHost(u.Hostname()) {
-		return []string{base}, nil
-	}
-	return []string{base, "http://" + strings.TrimPrefix(base, "https://")}, nil
-}
-
-func isLocalHost(h string) bool {
-	if net.ParseIP(h) != nil || h == "localhost" || !strings.Contains(h, ".") {
-		return true
-	}
-	for _, suffix := range []string{".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa"} {
-		if strings.HasSuffix(h, suffix) {
-			return true
-		}
-	}
-	return false
 }
 
 func (o *openCloud) status(ctx context.Context, base string) (statusInfo, error) {
@@ -308,7 +273,7 @@ func (o *openCloud) Drives(ctx context.Context, acct provider.Account, sec provi
 	return drivesFrom(body.Value), nil
 }
 
-func (o *openCloud) Remote(env provider.Env, acct provider.Account, d provider.Drive) (provider.Remote, error) {
+func (o *openCloud) Remote(env provider.Env, acct provider.Account, _ provider.Secret, d provider.Drive) (provider.Remote, error) {
 	if d.Location == "" {
 		return provider.Remote{}, fmt.Errorf("drive %q has no WebDAV URL", d.Name)
 	}

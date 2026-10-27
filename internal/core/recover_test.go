@@ -61,7 +61,7 @@ func (f *flaky) Drives(context.Context, provider.Account, provider.Secret) ([]pr
 	}
 	return []provider.Drive{{ID: "me", Name: "me", Kind: provider.KindPersonal}}, nil
 }
-func (*flaky) Remote(provider.Env, provider.Account, provider.Drive) (provider.Remote, error) {
+func (*flaky) Remote(provider.Env, provider.Account, provider.Secret, provider.Drive) (provider.Remote, error) {
 	return provider.Remote{}, nil
 }
 

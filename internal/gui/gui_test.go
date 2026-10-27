@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,11 +25,17 @@ import (
 	"github.com/protomothis/proto-easy-mount/internal/provider"
 	"github.com/protomothis/proto-easy-mount/internal/store"
 	"github.com/protomothis/proto-easy-mount/internal/update"
+	"github.com/protomothis/proto-easy-mount/internal/winfspsetup"
 )
 
 type fakeProvider struct{}
 
-func init() { provider.Register(fakeProvider{}) }
+func init() {
+	provider.Register(fakeProvider{})
+	// Screens assume the driver is there, as on a set-up PC; CI machines lack
+	// WinFsp. TestDriverSetupFirst covers the missing case.
+	winfspInstalled = func() bool { return true }
+}
 
 func (fakeProvider) Name() string               { return "fake" }
 func (fakeProvider) Title() string              { return "예시 서비스" }
@@ -52,7 +59,7 @@ func (fakeProvider) Drives(context.Context, provider.Account, provider.Secret) (
 		{ID: "sh", Name: "Shares", Kind: provider.KindShares},
 	}, nil
 }
-func (fakeProvider) Remote(provider.Env, provider.Account, provider.Drive) (provider.Remote, error) {
+func (fakeProvider) Remote(provider.Env, provider.Account, provider.Secret, provider.Drive) (provider.Remote, error) {
 	return provider.Remote{}, nil
 }
 
@@ -298,5 +305,130 @@ func TestLayoutAboutUpdate(t *testing.T) {
 	render(t, u, "about-update")
 	if u.NewVersion() != "v0.2.0" {
 		t.Fatal("tray would not see the update")
+	}
+}
+
+// The theme chosen by hand wins over the system setting and is kept.
+func TestThemeChoice(t *testing.T) {
+	u := newUI(t, false)
+	if u.wantDark(false) || !u.wantDark(true) {
+		t.Fatal("default must follow the system")
+	}
+	render(t, u, "") // create the buttons
+	u.themeW.btns[2].Click()
+	render(t, u, "")
+	if u.svc.Theme() != "dark" || !u.wantDark(false) {
+		t.Fatalf("after 어둡게: theme %q", u.svc.Theme())
+	}
+	u.themeW.btns[1].Click()
+	render(t, u, "")
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "settings", u.settings)
+	}
+	if u.wantDark(true) {
+		t.Fatal("밝게 must ignore a dark system")
+	}
+}
+
+// A file whose data is all on the server says it is being checked, with
+// the time left, instead of sitting at 99%.
+func TestLayoutServerChecking(t *testing.T) {
+	u := newUI(t, true)
+	u.activity = func() core.Activity {
+		return core.Activity{Uploads: 1, Files: []mount.Transfer{
+			{Name: "big.zip", Up: true, Percent: 99, Instant: true, Checking: true, Left: 48 * time.Second},
+		}}
+	}
+	render(t, u, "")
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "checking", u.activityBar)
+	}
+	for d, want := range map[time.Duration]string{0: "…", 48 * time.Second: " · 약 48초", 200 * time.Second: " · 약 3분"} {
+		if got := aboutLeft(d); got != want {
+			t.Errorf("aboutLeft(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
+
+// The switch in the app wins over the installer's choice.
+func TestAutoCheckChoice(t *testing.T) {
+	u := newUI(t, false)
+	u.svc.SetUpdateCheck(false)
+	if u.autoCheck() {
+		t.Fatal("update check on although switched off in the app")
+	}
+	u.svc.SetUpdateCheck(true)
+	if !u.autoCheck() {
+		t.Fatal("update check off although switched on in the app")
+	}
+}
+
+// Without WinFsp the window asks to install it before showing any drive;
+// once installed, the usual screen comes back.
+func TestDriverSetupFirst(t *testing.T) {
+	var installed atomic.Bool
+	oldNeeded, oldInstalled, oldInstall := winfspNeeded, winfspInstalled, winfspInstall
+	defer func() { winfspNeeded, winfspInstalled, winfspInstall = oldNeeded, oldInstalled, oldInstall }()
+	winfspNeeded = true
+	winfspInstalled = installed.Load
+	winfspInstall = func(_ context.Context, phase func(winfspsetup.Phase)) error {
+		phase(winfspsetup.Downloading)
+		phase(winfspsetup.Installing)
+		installed.Store(true)
+		return nil
+	}
+
+	u := newUI(t, true)
+	render(t, u, "")
+	if u.driverReady(layout.Context{Ops: new(op.Ops)}) {
+		t.Fatal("ready without WinFsp")
+	}
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "winfsp-setup", func(gtx C) D {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(u.header), vspace(12), layout.Rigid(u.driverCard))
+		})
+	}
+	u.driver.install.Click()
+	render(t, u, "")
+	deadline := time.Now().Add(5 * time.Second)
+	for !installed.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	u.driver.mu.Lock()
+	for u.driver.busy && time.Now().Before(deadline) {
+		u.driver.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		u.driver.mu.Lock()
+	}
+	u.driver.mu.Unlock()
+	if !u.driverReady(layout.Context{Ops: new(op.Ops)}) {
+		t.Fatal("still asking for WinFsp after installing it")
+	}
+}
+
+// Password providers ask for an account here, masked, and say 로그인
+// instead of sending the person to the browser.
+func TestPasswordProviderStep(t *testing.T) {
+	u := newUI(t, false)
+	p, err := provider.Get("webdav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !passwordLogin(p) {
+		t.Fatal("webdav not seen as a password login")
+	}
+	if nc, _ := provider.Get("nextcloud"); passwordLogin(nc) {
+		t.Fatal("nextcloud signs in through the browser")
+	}
+	u.add.prefill(p, "https://nas.example.com:5006/home", map[string]string{"user": "alice"})
+	u.add.optEditor("webdav/password").SetText("secret")
+	render(t, u, "")
+	if m := u.add.optEditor("webdav/password").Mask; m == 0 {
+		t.Fatal("password not masked")
+	}
+	if dir := os.Getenv("PEM_SNAPSHOT_DIR"); dir != "" {
+		shot(t, u, dir, "add-webdav", func(gtx C) D { return u.add.layout(gtx, true) })
+		u.add.reset()
+		shot(t, u, dir, "add-pick", func(gtx C) D { return u.add.layout(gtx, true) })
 	}
 }

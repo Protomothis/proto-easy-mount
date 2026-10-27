@@ -61,11 +61,14 @@ type UI struct {
 	add       *addFlow
 	addBtn    widget.Clickable
 	autoStart widget.Bool
+	suspendSw widget.Bool // 네트워크가 끊기면 드라이브 잠시 끄기
 	autoErr   string
 	showAdd   bool
 	quitBtn   widget.Clickable
 	logBtn    widget.Clickable
-	dark      bool      // palette in use
+	dark      bool // palette in use
+	themeW    themeWidgets
+	driver    driverSetup
 	quitArmed time.Time // first click while drives are mounted only arms the button
 	accts     map[string]*acctWidgets
 	drives    map[string]*driveWidgets
@@ -176,7 +179,7 @@ func (u *UI) loop(w *app.Window) {
 			u.mu.Unlock()
 			return
 		case app.FrameEvent:
-			if d := sysDark.Load(); d != u.dark {
+			if d := u.wantDark(sysDark.Load()); d != u.dark {
 				u.setDark(d)
 				darkTitleBar(hwnd, d)
 			}
@@ -214,6 +217,16 @@ func watchTheme(w *app.Window, dark *atomic.Bool, stop <-chan struct{}) {
 }
 
 func (u *UI) layout(gtx C) D {
+	if !u.driverReady(gtx) {
+		// nothing can be mounted yet: set up the driver first
+		return u.list.Layout(gtx, 3, func(gtx C, i int) D {
+			in := layout.Inset{Left: 16, Right: 16, Top: 6, Bottom: 6}
+			if i == 0 {
+				in.Top = 20
+			}
+			return in.Layout(gtx, []layout.Widget{u.header, u.driverCard, u.settings}[i])
+		})
+	}
 	accts := u.svc.Snapshot()
 	u.add.update(gtx)
 
@@ -300,14 +313,17 @@ func (u *UI) activityBar(gtx C) D {
 	title, note := "내려받는 중", ""
 	if act.Uploads > 0 {
 		title = fmt.Sprintf("서버로 올리는 중 · %d개 남음", act.Uploads)
-		instant := 0
+		instant, checking := 0, false
 		for _, f := range act.Files {
 			if f.Instant {
 				instant++
 			}
+			checking = checking || f.Checking
 		}
 		if act.Uploads > instant {
 			note = "탐색기 복사는 끝났어요. 업로드가 끝날 때까지 앱을 끄지 마세요."
+		} else if checking {
+			note = "서버가 받은 파일을 확인하는 동안 탐색기는 99%에서 기다려요."
 		} else {
 			note = "탐색기 복사가 끝나면 서버에도 저장된 거예요."
 		}
@@ -343,8 +359,14 @@ func (u *UI) activityBar(gtx C) D {
 	})
 }
 
-// fileProgress is one upload: name and percent over a thin meter.
+// fileProgress is one upload: name and percent over a thin meter. Once all
+// data is sent the server still finishes the file (Explorer sits at 99%
+// meanwhile), so that wait gets its own words and time.
 func (u *UI) fileProgress(gtx C, f mount.Transfer) D {
+	state, stateCol, frac := fmt.Sprintf("%d%%", f.Percent), colSub, float64(f.Percent)/100
+	if f.Checking {
+		state, stateCol, frac = "서버 확인 중"+aboutLeft(f.Left), colAccent, 1
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -354,12 +376,25 @@ func (u *UI) fileProgress(gtx C, f mount.Transfer) D {
 					return l.Layout(gtx)
 				}),
 				hspace(8),
-				layout.Rigid(label(u.th, 12, fmt.Sprintf("%d%%", f.Percent), colSub, font.Medium).Layout),
+				layout.Rigid(label(u.th, 12, state, stateCol, font.Medium).Layout),
 			)
 		}),
 		vspace(4),
-		layout.Rigid(func(gtx C) D { return usageBar(gtx, float64(f.Percent)/100, colAccent) }),
+		layout.Rigid(func(gtx C) D { return usageBar(gtx, frac, colAccent) }),
 	)
+}
+
+// aboutLeft words an estimated wait: " · 약 50초", " · 약 3분", or "…"
+// when the estimate has run out.
+func aboutLeft(d time.Duration) string {
+	switch s := int(d.Round(time.Second) / time.Second); {
+	case s <= 0:
+		return "…"
+	case s < 90:
+		return fmt.Sprintf(" · 약 %d초", s)
+	default:
+		return fmt.Sprintf(" · 약 %d분", (s+30)/60)
+	}
 }
 
 func (u *UI) active() bool {
@@ -407,6 +442,12 @@ func (u *UI) account(gtx C, a core.AccountView) D {
 
 	if aw.refresh.Clicked(gtx) && !a.Loading {
 		go u.svc.Refresh(context.Background(), a.ID)
+	}
+	if p, err := provider.Get(a.Provider); err == nil && passwordLogin(p) && aw.signIn.Clicked(gtx) {
+		// only the person knows the new password: open the sign-in step
+		// filled in; signing in replaces this account in place
+		u.add.prefill(p, a.Server, map[string]string{"user": a.User})
+		u.showAdd = true
 	}
 	if aw.signIn.Clicked(gtx) && !aw.signingIn.Load() {
 		aw.signingIn.Store(true)
@@ -495,7 +536,7 @@ func (u *UI) driveRow(gtx C, acctID string, d core.DriveView) D {
 		dw = &driveWidgets{}
 		u.drives[key] = dw
 	}
-	on := d.State == core.Mounted || d.State == core.Connecting
+	on := d.State == core.Mounted || d.State == core.Connecting || d.State == core.Suspended
 	if dw.sw.Update(gtx) {
 		if dw.sw.Value {
 			u.svc.Mount(acctID, d.ID)
@@ -558,6 +599,11 @@ func (u *UI) driveRow(gtx C, acctID string, d core.DriveView) D {
 		}
 	case core.Failed:
 		status, col = "오류: "+d.Err, colDanger
+	case core.Suspended:
+		status, col = "서버 응답 없음 · 돌아오면 다시 켜요", colDanger
+		if d.Err != "" {
+			status = "다시 켜지 못해 잠시 뒤 다시 시도해요" // the server answers, the mount didn't
+		}
 	}
 
 	row := func(gtx C) D {
@@ -718,6 +764,8 @@ func (u *UI) settings(gtx C) D {
 		if u.autoErr != "" {
 			children = append(children, vspace(8), layout.Rigid(label(u.th, 12, u.autoErr, colDanger, font.Normal).Layout))
 		}
+		children = append(children, vspace(16), layout.Rigid(u.suspendRow))
+		children = append(children, vspace(16), layout.Rigid(u.themeRow))
 		children = append(children,
 			vspace(16),
 			layout.Rigid(func(gtx C) D { return u.footer(gtx) }),

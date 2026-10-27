@@ -16,12 +16,22 @@
 파일을 PC에 내려받아 두지 않습니다. 열 때 서버에서 바로 읽고, 저장하면 서버로 올립니다.
 영상은 옮기지 않고 그대로 재생 · 탐색할 수 있습니다.
 
-지원 서비스: **OpenCloud** (ownCloud Infinite Scale 계열). 다른 서비스도 붙일 수 있게 만들었습니다([새 서비스 추가](#새-서비스-추가)).
+지원 서비스:
+
+| 서비스 | 로그인 | 즉시 반영형 |
+|---|---|---|
+| **OpenCloud** (ownCloud Infinite Scale 계열) | 브라우저 (OpenID Connect) | 지원 |
+| **Nextcloud** (16 이상) | 브라우저 (Login Flow v2, 앱 비밀번호 발급) | 없음 (안정형) |
+| **WebDAV** (시놀로지 · QNAP NAS, Apache/nginx 등) | 사용자 이름 · 비밀번호 | 없음 (안정형) |
+
+다른 서비스도 붙일 수 있게 만들었습니다([새 서비스 추가](#새-서비스-추가)).
 
 ## 설치
 
 1. [Releases](https://github.com/Protomothis/proto-easy-mount/releases/latest)에서 `ProtoEasyMount-Setup-<버전>.exe`를 받아 실행합니다.
-   관리자 권한 없이 설치됩니다. 드라이브 연결에 필요한 [WinFsp](https://winfsp.dev)가 없으면 그것만 관리자 확인을 한 번 묻습니다.
+   기본은 지금 사용자에게만, 관리자 권한 없이 설치됩니다. 첫 화면에서 "모든 사용자"를 고르면 Program Files에 설치합니다(관리자 권한 필요).
+   드라이브 연결에 필요한 [WinFsp](https://winfsp.dev)가 없으면 공식 설치 파일을 받아(해시 확인) 설치하며, 그것만 관리자 확인을 한 번 묻습니다.
+   설치하지 못했으면 앱이 드라이브를 연결하기 전에 WinFsp 설치를 먼저 안내합니다.
 2. 앱에서 서비스를 고르고 서버 주소(`cloud.example.com`, 집 안이면 `192.168.0.10:9200` 같은 IP도 됨)를 넣습니다.
 3. 브라우저에서 로그인하면 공간 목록이 나옵니다. 스위치를 켜면 드라이브가 연결됩니다.
 
@@ -38,7 +48,7 @@
   서버에 할당량이 정해져 있지 않으면 사용량만 보이고, 탐색기에는 용량이 아주 크게 보일 수 있습니다.
 - 공간마다 스위치로 연결 · 해제하고 [열기]로 탐색기를 엽니다. 연결해 둔 드라이브는 다음 실행 때 다시 연결됩니다.
 - 창을 닫아도 트레이에서 계속 동작합니다. 트레이 아이콘을 왼쪽 클릭하면 창, 오른쪽 클릭하면 메뉴가 열립니다.
-- Windows의 앱 테마(밝게 · 어둡게)를 따라갑니다.
+- 화면 테마는 Windows 설정을 따라가거나, 설정에서 밝게 · 어둡게로 고정할 수 있습니다.
 
 ### 공간별 설정 — 드라이브 문자와 업로드 방식
 
@@ -56,7 +66,7 @@
 | 수정 시각 | 원본 유지 | 64MB 이하는 원본 유지, 넘으면 업로드한 시각 |
 | 어울리는 경우 | 파일이 많을 때, 네트워크가 불안할 때 | "복사 끝 = 서버 반영"이 필요할 때 |
 
-즉시 반영형은 서버가 tus 업로드를 지원할 때만 보입니다. 끝에서 잠깐 기다리는 건 서버가 받은 파일을 확인하는 시간(OpenCloud 기준 1GB에 약 10초)입니다.
+즉시 반영형은 서버가 tus 업로드를 지원할 때만 보입니다(지금은 OpenCloud). 끝에서 잠깐 기다리는 건 서버가 받은 파일을 확인하는 시간(OpenCloud 기준 1GB에 약 10초)입니다.
 크기를 미리 알 수 없는 쓰기나 서버 오류처럼 즉시 반영이 어려운 파일은 그 파일만 안정형으로 넘어가므로 데이터를 잃지 않습니다.
 
 ### 전송 상황
@@ -82,7 +92,8 @@
 
 ## 알아 두면 좋은 것
 
-- **네트워크** — 네트워크보다 앱이 먼저 시작해도(예: 자동 실행) 연결되면 스스로 다시 연결합니다. 로그인이 만료됐을 때만 [다시 로그인]이 뜹니다.
+- **네트워크** — 서버가 30초쯤 응답하지 않으면 켜 둔 드라이브를 잠시 끄고(탐색기가 멈추지 않게), 다시 응답하면 켠 뒤 Windows 알림으로 알려 줍니다. 설정에서 끌 수 있습니다.
+  네트워크보다 앱이 먼저 시작해도(예: 자동 실행) 연결되면 스스로 다시 연결합니다. 로그인이 만료됐을 때만 [다시 로그인]이 뜹니다.
 - **토큰** — 로그인 정보는 Windows 자격 증명 관리자에만 저장합니다.
 - **로그** — `%LOCALAPPDATA%\proto-easy-mount\app.log`. 창의 [로그 폴더] 버튼으로 열 수 있습니다. 문제를 알려 주실 때 함께 보내 주세요.
 - **제거** — 설정 · 계정(`%APPDATA%\proto-easy-mount`)은 남습니다. WinFsp는 다른 프로그램도 쓰므로 그대로 둡니다.
@@ -102,6 +113,12 @@ proto-easy-mount logout
 ```
 
 계정이 여러 개면 `--account <ID>`로 고릅니다(`accounts`로 확인).
+
+## Nextcloud · WebDAV
+
+- **Nextcloud**: 서버 주소를 넣으면 브라우저에 Nextcloud 로그인 · 허용 화면이 뜹니다. 허용하면 앱 비밀번호가 만들어져 이 앱만 씁니다(Nextcloud 개인 설정 → 보안 → 기기 및 세션에 "Proto Easy Mount"로 보이며, 거기서 지우면 연결이 끊깁니다). 로그아웃하면 앱 비밀번호도 지웁니다.
+- **WebDAV**: 서비스가 알려 주는 WebDAV 주소를 경로까지 넣습니다. 예: 시놀로지 WebDAV Server는 `https://nas:5006/공유폴더`. 비밀번호를 바꾸면 계정에 [다시 로그인]이 뜨고, 누르면 주소와 사용자 이름이 채워진 연결 화면이 열립니다.
+- 둘 다 비밀번호(앱 비밀번호)는 Windows 자격 증명 관리자에만 저장합니다.
 
 ## OpenCloud 서버 준비
 
@@ -146,11 +163,27 @@ tools/                    리소스 · 서명 · 서드파티 고지 생성
 2. `init()`에서 `provider.Register`를 부르고, `internal/cli/cli.go`에 빈 import를 더합니다.
 3. 즉시 반영형을 지원하려면 `provider.Instant`도 구현합니다.
 
+## 개인정보
+
+Proto Easy Mount는 사용자가 직접 연결한 저장소 서버 말고는 어디에도 정보를 보내지 않습니다.
+한 가지 예외로, 새 버전을 확인하려고 6시간마다 GitHub(`api.github.com`)에 공개 릴리스 목록을 요청합니다.
+이 요청에는 계정이나 파일 정보가 들어가지 않습니다(여느 웹 요청처럼 GitHub는 IP 주소를 봅니다).
+설치할 때 "새 버전 자동 확인"을 끄거나, 앱의 정보 → [업데이트 자동 확인]에서 끌 수 있습니다.
+
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it, except for the update check described above, which can be turned off during installation and in the app.
+
+## 코드 서명
+
+아직 실행 파일과 설치 파일에 코드 서명이 없어, 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다.
+릴리스 파일은 모두 이 저장소의 소스에서 GitHub Actions(`.github/workflows/release.yml`)로 빌드한 것이고,
+앱의 자동 업데이트는 릴리스에 붙은 서명된 `update.json`으로 설치 파일의 해시를 확인한 뒤에만 설치합니다.
+WinFsp는 설치 파일에 넣지 않습니다. 필요할 때 WinFsp 제작자가 서명한 공식 설치 파일을 GitHub에서 받아(고정 버전, SHA-256 확인) 그대로 실행합니다.
+
 ## 라이선스
 
 [GPL-3.0](LICENSE) © Protomothis
 
-rclone(MIT)의 Windows 마운트 계층을 고쳐 포함하고, WinFsp(GPLv3, FLOSS 예외)를 함께 설치합니다.
+rclone(MIT)의 Windows 마운트 계층을 고쳐 포함하고, 필요하면 WinFsp(GPLv3, FLOSS 예외)의 공식 설치 파일을 받아 설치합니다.
 포함된 오픈소스와 라이선스 전문은 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다.
 
 도움이 됐다면 ⭐ Star나 [GitHub Sponsors](https://github.com/sponsors/Protomothis)로 응원해 주세요.

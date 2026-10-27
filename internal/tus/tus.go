@@ -130,6 +130,29 @@ func (c *Client) Offset(ctx context.Context, upload string) (int64, error) {
 	return parseOffset(resp)
 }
 
+// FileInfo is what a plain HEAD on a file says about it.
+type FileInfo struct {
+	Size int64
+	ETag string
+}
+
+// Stat asks the WebDAV server about the file at fileURL; ok is false when
+// there is none.
+func (c *Client) Stat(ctx context.Context, fileURL string) (fi FileInfo, ok bool, err error) {
+	resp, err := c.do(ctx, http.MethodHead, fileURL, nil, 0, nil)
+	if err != nil {
+		return FileInfo{}, false, err
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return FileInfo{}, false, nil
+	case resp.StatusCode != http.StatusOK:
+		return FileInfo{}, false, statusErr("stat", resp)
+	}
+	return FileInfo{Size: resp.ContentLength, ETag: resp.Header.Get("ETag")}, true, nil
+}
+
 func parseOffset(resp *http.Response) (int64, error) {
 	v := resp.Header.Get("Upload-Offset")
 	n, err := strconv.ParseInt(v, 10, 64)

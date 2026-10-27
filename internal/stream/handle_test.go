@@ -116,18 +116,18 @@ func TestHandleStreamsExplorerCopy(t *testing.T) {
 			}
 		}
 	}
+	// Explorer waits for the write that completes the file (not for the
+	// close), so the server must have everything once it returns
+	got := r.fake.Uploads()["/dav/file.bin"]
+	if got == nil || !got.Done() || !bytes.Equal(got.Data, data) {
+		t.Fatal("server lacks the file after the last write")
+	}
 	if n := h.Node(); n.Size() != 5000 {
-		t.Fatalf("node size %d during upload", n.Size())
+		t.Fatalf("node size %d after upload", n.Size())
 	}
 	mt := time.Date(2024, 3, 9, 16, 0, 0, 0, time.UTC)
 	if err := h.SetModTime(mt); err != nil {
 		t.Fatal(err)
-	}
-	// Explorer waits for this call (not for the close), so the server must
-	// have everything once it returns
-	got := r.fake.Uploads()["/dav/file.bin"]
-	if got == nil || !got.Done() || !bytes.Equal(got.Data, data) {
-		t.Fatal("server lacks the file after setting the time")
 	}
 	if r.host.finished != 1 || !r.host.mtime.Equal(mt) {
 		t.Fatalf("finished=%d mtime=%v", r.host.finished, r.host.mtime)
@@ -266,6 +266,32 @@ func TestHandleHoldsSmallFileForModTime(t *testing.T) {
 	got := fake.Uploads()["/dav/file.bin"]
 	if got == nil || !bytes.Equal(got.Data, data) || got.Meta["mtime"] != "1710000000" {
 		t.Fatalf("upload = %+v", got)
+	}
+	h.Flush()
+	h.Release()
+}
+
+// A server that needs longer than one request may wait gets two waits:
+// the last write's and setting the time.
+func TestHandleWaitsTwiceForSlowServer(t *testing.T) {
+	old := flushWait
+	flushWait = 150 * time.Millisecond
+	defer func() { flushWait = old }()
+	r := newRig(t, &tustest.FakeServer{Finish: 250 * time.Millisecond})
+	data := randomBytes(3000)
+	h := NewHandle(r.host, r.cfg, os.O_WRONLY|os.O_CREATE, true)
+	h.Truncate(3000)
+	if _, err := h.WriteAt(data, 0); err != nil {
+		t.Fatal(err)
+	}
+	if r.host.finished != 0 || !h.Streaming() {
+		t.Fatal("finished in the last write")
+	}
+	if err := h.SetModTime(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r.host.finished != 1 {
+		t.Fatal("not finished after the second wait")
 	}
 	h.Flush()
 	h.Release()
