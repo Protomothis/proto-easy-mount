@@ -584,6 +584,9 @@ func (u *UI) driveRow(gtx C, acctID string, d core.DriveView) D {
 		status, col = "오류: "+d.Err, colDanger
 	case core.Suspended:
 		status, col = "서버 응답 없음 · 돌아오면 다시 켜요", colDanger
+		if d.Err != "" {
+			status = "다시 켜지 못해 잠시 뒤 다시 시도해요" // the server answers, the mount didn't
+		}
 	}
 
 	row := func(gtx C) D {

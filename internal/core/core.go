@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/protomothis/proto-easy-mount/internal/mount"
 	"github.com/protomothis/proto-easy-mount/internal/provider"
@@ -132,7 +133,12 @@ type mountState struct {
 	stopping bool
 	// suspended is set when the network watch switched the drive off.
 	suspended bool
-	uploads   int
+	// While the network watch brings a drive back: whether this mount is
+	// such an attempt, how many there were, and when the next may start.
+	resuming bool
+	tries    int
+	nextTry  time.Time
+	uploads  int
 }
 
 // Service is safe for concurrent use.
@@ -463,7 +469,11 @@ func (s *Service) RefreshAll(ctx context.Context) {
 }
 
 // Mount starts mounting a drive in the background.
-func (s *Service) Mount(acctID, driveID string) {
+func (s *Service) Mount(acctID, driveID string) { s.mount(acctID, driveID, false) }
+
+// mount mounts a drive; resume is set when the network watch brings back a
+// drive it switched off, which goes back to Suspended if it fails.
+func (s *Service) mount(acctID, driveID string, resume bool) {
 	k := mountKey{acctID, driveID}
 	s.mu.Lock()
 	as := s.accounts[acctID]
@@ -483,6 +493,13 @@ func (s *Service) Mount(acctID, driveID string) {
 	}
 	d := *drive
 	ms := &mountState{state: Connecting}
+	if prev := s.mounts[k]; resume {
+		if prev == nil || prev.state != Suspended {
+			s.mu.Unlock()
+			return // switched off by hand meanwhile
+		}
+		ms.resuming, ms.tries, ms.target = true, prev.tries+1, prev.target
+	}
 	s.mounts[k] = ms
 	s.mu.Unlock()
 	s.notify()
@@ -496,6 +513,12 @@ func (s *Service) Mount(acctID, driveID string) {
 		s.mu.Lock()
 		cancelled := ms.stopping
 		switch {
+		case err != nil && ms.resuming && !ms.stopping:
+			// the server answers but the drive won't come back yet: stay
+			// switched off and try again later, waiting longer each time
+			wait := resumeBackoff(ms.tries)
+			ms.state, ms.err, ms.suspended, ms.nextTry = Suspended, err.Error(), true, time.Now().Add(wait)
+			slog.Warn(fmt.Sprintf("다시 연결 실패 %s/%s (%d번째), %v 뒤 다시 시도: %v", acctID, d.Name, ms.tries, wait, err))
 		case err != nil:
 			ms.state, ms.err = Failed, err.Error()
 			slog.Error(fmt.Sprintf("연결 실패 %s/%s: %v", acctID, d.Name, err))
@@ -506,6 +529,7 @@ func (s *Service) Mount(acctID, driveID string) {
 			ms.state, ms.target, ms.m = Mounted, m.Target, m
 			slog.Info(fmt.Sprintf("연결됨 %s/%s → %s", acctID, d.Name, m.Target))
 		}
+		resumed := ms.resuming && err == nil && !cancelled
 		s.mu.Unlock()
 		if err == nil && cancelled {
 			m.Unmount()
@@ -514,6 +538,9 @@ func (s *Service) Mount(acctID, driveID string) {
 		}
 		if err == nil {
 			s.prefs.setMounted(acctID, driveID, true)
+		}
+		if resumed {
+			s.toast("드라이브를 다시 연결했어요", fmt.Sprintf("서버에 다시 연결돼 %s 드라이브를 켰어요.", m.Target))
 		}
 		s.notify()
 		if err != nil {

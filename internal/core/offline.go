@@ -107,7 +107,9 @@ func (s *Service) probe(ctx context.Context, id string) {
 		slog.Warn(fmt.Sprintf("서버 응답 없음 %s (%d번 연속)", id, offlineAfter))
 	case goOnline:
 		slog.Info(fmt.Sprintf("서버 응답 돌아옴 %s", id))
-		s.resume(id)
+	}
+	if !offline {
+		s.resume(id) // on every answered probe: drives whose last try failed come back later
 	}
 	if offline && s.AutoSuspend() {
 		s.suspend(id) // again on later probes: drives held by uploads go when those end
@@ -161,12 +163,15 @@ func (s *Service) suspend(id string) {
 	s.notify()
 }
 
-// resume switches the drives the network watch turned off back on.
+// resume switches the drives the network watch turned off back on, those
+// whose last attempt failed once their wait is over. Each drive says when
+// it is back (see mount).
 func (s *Service) resume(id string) {
+	now := time.Now()
 	s.mu.Lock()
 	var drives, names []string
 	for k, ms := range s.mounts {
-		if k.acct == id && ms.state == Suspended {
+		if k.acct == id && ms.state == Suspended && !now.Before(ms.nextTry) {
 			drives = append(drives, k.drive)
 			names = append(names, ms.target)
 		}
@@ -177,9 +182,14 @@ func (s *Service) resume(id string) {
 	}
 	slog.Info(fmt.Sprintf("드라이브 다시 연결 %s: %s", id, strings.Join(names, ", ")))
 	for _, d := range drives {
-		s.Mount(id, d)
+		s.mount(id, d, true)
 	}
-	s.toast("드라이브를 다시 연결했어요", fmt.Sprintf("서버에 다시 연결돼 %s 드라이브를 켰어요.", strings.Join(names, ", ")))
+}
+
+// resumeBackoff is how long to wait after the n-th failed attempt to bring a
+// drive back: 10 s, doubling, at most 5 minutes.
+func resumeBackoff(n int) time.Duration {
+	return min(probeEvery<<min(max(n-1, 0), 5), 5*time.Minute)
 }
 
 func (s *Service) toast(title, text string) {

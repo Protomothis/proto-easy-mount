@@ -81,16 +81,48 @@ func TestNetworkWatch(t *testing.T) {
 	if offline() {
 		t.Fatal("still offline after the server answered")
 	}
+	// the test provider can't really mount: the attempt fails and the
+	// drive goes back to waiting, with a later retry and no "back" notice
+	ms := settled(t, s, k)
+	if ms.state != Suspended || ms.tries != 1 || !ms.nextTry.After(time.Now()) {
+		t.Fatalf("after a failed resume: state %v, tries %d, next %v", ms.state, ms.tries, ms.nextTry)
+	}
+	s.probe(ctx, acct.ID) // too soon: no new attempt
+	if ms := settled(t, s, k); ms.tries != 1 {
+		t.Fatalf("retried before the wait was over (%d tries)", ms.tries)
+	}
 	s.mu.Lock()
-	state := s.mounts[k].state
+	s.mounts[k].nextTry = time.Now().Add(-time.Second)
 	s.mu.Unlock()
-	if state == Suspended {
-		t.Fatal("suspended drive was not switched back on")
+	s.probe(ctx, acct.ID)
+	if ms := settled(t, s, k); ms.tries != 2 || ms.state != Suspended {
+		t.Fatalf("second attempt: state %v, tries %d", ms.state, ms.tries)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(toasts) != 1 || toasts[0] != "드라이브를 다시 연결했어요" {
+	if len(toasts) != 0 {
 		t.Fatalf("notifications = %q", toasts)
+	}
+	if w := resumeBackoff(1); w != probeEvery {
+		t.Fatalf("first wait %v", w)
+	}
+	if w := resumeBackoff(20); w != 5*time.Minute {
+		t.Fatalf("longest wait %v", w)
+	}
+}
+
+// settled waits for a mount attempt to end and returns its state.
+func settled(t *testing.T, s *Service, k mountKey) mountState {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		ms := *s.mounts[k]
+		s.mu.Unlock()
+		if ms.state != Connecting || time.Now().After(deadline) {
+			return ms
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
