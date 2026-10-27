@@ -11,7 +11,9 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"fyne.io/systray"
 
@@ -86,15 +88,37 @@ func main() {
 		u.Show()
 	}
 
-	run(t.OnReady, func() {
+	runUntilExited(run, t.OnReady, func() {
 		t.Close()
 		svc.Shutdown()
 		if p := installer.Load(); p != nil {
 			if err := update.Install(*p); err != nil {
 				slog.Error(fmt.Sprintf("업데이트 설치 시작 실패: %v", err))
+			} else {
+				slog.Info("업데이트 설치 프로그램 시작: " + *p)
 			}
 		}
+	}, time.Minute)
+}
+
+// runUntilExited runs the tray and returns only once onExit has finished.
+// systray.Quit runs onExit on the goroutine that called it while the message
+// loop, and so run, may already have returned; returning from main then
+// ends the process in the middle of onExit, before an update's installer
+// starts (#14). grace bounds the wait when onExit never comes.
+func runUntilExited(run func(onReady, onExit func()), onReady, onExit func(), grace time.Duration) {
+	done := make(chan struct{})
+	var once sync.Once // systray's own guard against a second call isn't race-free
+	run(onReady, func() {
+		once.Do(func() {
+			defer close(done)
+			onExit()
+		})
 	})
+	select {
+	case <-done:
+	case <-time.After(grace):
+	}
 }
 
 func printToken(st *store.Store, args []string) {
