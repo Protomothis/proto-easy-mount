@@ -40,6 +40,11 @@ type Request struct {
 	// TotalSize, when positive, is reported as the drive's capacity; it
 	// comes from the server's quota. Otherwise the backend decides.
 	TotalSize int64
+	// Usage, when set, gives the drive's used space and limit (0 for none)
+	// as the app last read them, ok false while unknown. It takes over from
+	// the backend's WebDAV quota, which OpenCloud leaves empty: Explorer
+	// then shows the whole drive free.
+	Usage func() (used, total int64, ok bool)
 	// Instant, when set, makes copies finish only once the server has
 	// the file (Windows only; ignored elsewhere).
 	Instant *Instant
@@ -190,6 +195,9 @@ func Start(ctx context.Context, req Request) (*Mounted, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", req.Name, err)
 	}
+	if req.Usage != nil {
+		useUsage(f, req.Usage)
+	}
 
 	vfsOpt := vfscommon.Opt
 	// Writes go through a temporary local file, uploaded on close and then
@@ -221,6 +229,29 @@ func Start(ctx context.Context, req Request) (*Mounted, error) {
 		return nil, explain(err)
 	}
 	return &Mounted{Target: mp.MountPoint, mp: mp}, nil
+}
+
+// useUsage makes f's About answer from usage, falling back to the backend's
+// own answer while usage is unknown. The VFS asks About for the drive's
+// free space (Statfs), at most once per directory cache time.
+func useUsage(f fs.Fs, usage func() (used, total int64, ok bool)) {
+	features := f.Features()
+	backend := features.About
+	features.About = func(ctx context.Context) (*fs.Usage, error) {
+		used, total, ok := usage()
+		if !ok {
+			if backend == nil {
+				return &fs.Usage{}, nil
+			}
+			return backend(ctx)
+		}
+		u := &fs.Usage{Used: fs.NewUsageValue(used)}
+		if total > 0 {
+			u.Total = fs.NewUsageValue(total)
+			u.Free = fs.NewUsageValue(max(total-used, 0))
+		}
+		return u, nil
+	}
 }
 
 func explain(err error) error {
