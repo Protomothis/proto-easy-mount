@@ -1,5 +1,6 @@
 // Package instance keeps the desktop app to one process per user. A second
-// launch asks the running one to show its window and then exits.
+// launch asks the running one to show its window, or to open the link it
+// was started with, and then exits.
 package instance
 
 import (
@@ -21,8 +22,9 @@ type Primary struct {
 }
 
 // Acquire returns a Primary when this is the first process. Otherwise it
-// signals the running process to activate and returns nil.
-func Acquire(dir string, onActivate func()) (*Primary, error) {
+// signals the running process and returns nil: onActivate runs there with
+// link, the connection link this launch was given ("" to just show).
+func Acquire(dir, link string, onActivate func(link string)) (*Primary, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -33,7 +35,7 @@ func Acquire(dir string, onActivate func()) (*Primary, error) {
 	}
 	portFile := filepath.Join(dir, "app.port")
 	if !ok {
-		return nil, activate(portFile)
+		return nil, activate(portFile, link)
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -56,15 +58,19 @@ func Acquire(dir string, onActivate func()) (*Primary, error) {
 			c.SetReadDeadline(time.Now().Add(2 * time.Second))
 			line, _ := bufio.NewReader(c).ReadString('\n')
 			c.Close()
-			if strings.TrimSpace(line) == "show" {
-				onActivate()
+			// "show", or "open <link>"; app versions before links only send "show"
+			switch cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " "); cmd {
+			case "show":
+				onActivate("")
+			case "open":
+				onActivate(arg)
 			}
 		}
 	}()
 	return &Primary{lock: lock, ln: ln}, nil
 }
 
-func activate(portFile string) error {
+func activate(portFile, link string) error {
 	b, err := os.ReadFile(portFile)
 	if err != nil {
 		return fmt.Errorf("already running, but cannot reach it: %w", err)
@@ -74,7 +80,11 @@ func activate(portFile string) error {
 		return fmt.Errorf("already running, but cannot reach it: %w", err)
 	}
 	defer c.Close()
-	_, err = c.Write([]byte("show\n"))
+	msg := "show\n"
+	if link = strings.TrimSpace(link); link != "" && !strings.ContainsAny(link, "\r\n") {
+		msg = "open " + link + "\n"
+	}
+	_, err = c.Write([]byte(msg))
 	return err
 }
 

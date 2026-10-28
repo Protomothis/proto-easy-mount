@@ -22,6 +22,7 @@ import (
 	"github.com/protomothis/proto-easy-mount/internal/core"
 	"github.com/protomothis/proto-easy-mount/internal/gui"
 	"github.com/protomothis/proto-easy-mount/internal/instance"
+	"github.com/protomothis/proto-easy-mount/internal/invite"
 	"github.com/protomothis/proto-easy-mount/internal/mount"
 	"github.com/protomothis/proto-easy-mount/internal/notify"
 	"github.com/protomothis/proto-easy-mount/internal/store"
@@ -43,9 +44,22 @@ func main() {
 	}
 	background := slices.Contains(os.Args[1:], autostart.BackgroundFlag)
 
+	// Windows starts the app with the link as its argument when a
+	// proto-easy-mount: link is opened (#18).
+	var link string
+	for _, a := range os.Args[1:] {
+		if invite.IsLink(a) {
+			link = a
+		}
+	}
+
 	var ui atomic.Pointer[gui.UI]
-	primary, err := instance.Acquire(st.CacheDir, func() {
-		if u := ui.Load(); u != nil {
+	primary, err := instance.Acquire(st.CacheDir, link, func(link string) {
+		switch u := ui.Load(); {
+		case u == nil:
+		case link != "":
+			u.OpenLink(link)
+		default:
 			u.Show()
 		}
 	})
@@ -53,7 +67,7 @@ func main() {
 		fatal(err)
 	}
 	if primary == nil {
-		return // the running instance was asked to show itself
+		return // the running instance was asked to show itself or open the link
 	}
 	defer primary.Release()
 
@@ -84,7 +98,10 @@ func main() {
 	go svc.RefreshAll(context.Background())
 	go svc.Watch(context.Background())
 	go u.WatchUpdates(context.Background())
-	if !background || len(svc.Snapshot()) == 0 {
+	switch {
+	case link != "":
+		u.OpenLink(link)
+	case !background || len(svc.Snapshot()) == 0:
 		u.Show()
 	}
 

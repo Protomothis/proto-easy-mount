@@ -110,6 +110,12 @@ Root: HKA; Subkey: "Software\Protomothis\ProtoEasyMount"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Protomothis\ProtoEasyMount"; ValueType: dword; ValueName: "UpdateCheck"; ValueData: "1"; Tasks: updatecheck
 Root: HKA; Subkey: "Software\Protomothis\ProtoEasyMount"; ValueType: dword; ValueName: "UpdateCheck"; ValueData: "0"; Tasks: not updatecheck
 
+; Connection links (proto-easy-mount://add?…) open the app (internal/invite).
+Root: HKA; Subkey: "Software\Classes\proto-easy-mount"; ValueType: string; ValueName: ""; ValueData: "URL:Proto Easy Mount"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\proto-easy-mount"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\proto-easy-mount\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"",0"
+Root: HKA; Subkey: "Software\Classes\proto-easy-mount\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 ; The app's own updater runs setup quietly with /RELAUNCH=1 after quitting.
