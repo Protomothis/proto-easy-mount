@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"io"
 	"path"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"gioui.org/app"
 	"gioui.org/font"
+	"gioui.org/io/clipboard"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -28,6 +30,7 @@ import (
 	"github.com/protomothis/proto-easy-mount/internal/browser"
 	"github.com/protomothis/proto-easy-mount/internal/core"
 	"github.com/protomothis/proto-easy-mount/internal/icon"
+	"github.com/protomothis/proto-easy-mount/internal/invite"
 	"github.com/protomothis/proto-easy-mount/internal/mount"
 	"github.com/protomothis/proto-easy-mount/internal/provider"
 )
@@ -53,6 +56,8 @@ type UI struct {
 	win *app.Window
 	// accounts with a logout in flight
 	busy map[string]bool
+	// link is a connection link waiting for the window goroutine (OpenLink)
+	link string
 
 	// Widget state below is only touched on the window goroutine.
 	th        *material.Theme
@@ -77,6 +82,8 @@ type UI struct {
 type acctWidgets struct {
 	refresh, logout widget.Clickable
 	signIn          widget.Clickable
+	share           widget.Clickable // copy the link for another PC
+	copiedUntil     time.Time
 	confirmUntil    time.Time
 	signingIn       atomic.Bool // a sign-in again is waiting for the browser
 }
@@ -141,6 +148,16 @@ func (u *UI) Show() {
 		app.MinSize(unit.Dp(360), unit.Dp(480)),
 	)
 	go u.loop(w)
+}
+
+// OpenLink shows the window at the add-storage step a connection link
+// fills in (#18). Safe from any goroutine.
+func (u *UI) OpenLink(raw string) {
+	u.mu.Lock()
+	u.link = raw
+	u.mu.Unlock()
+	u.Show()
+	u.invalidate()
 }
 
 func (u *UI) invalidate() {
@@ -228,6 +245,19 @@ func (u *UI) layout(gtx C) D {
 		})
 	}
 	accts := u.svc.Snapshot()
+	u.mu.Lock()
+	link := u.link
+	u.link = ""
+	u.mu.Unlock()
+	if link != "" && !u.add.busy() {
+		u.add.openLink(link)
+		u.showAdd = true
+		first := 1 + len(accts) // header, then accounts; scroll the add card into view
+		if u.active() {
+			first++
+		}
+		u.list.Position = layout.Position{First: first}
+	}
 	u.add.update(gtx)
 
 	var sections []layout.Widget
@@ -459,6 +489,14 @@ func (u *UI) account(gtx C, a core.AccountView) D {
 			u.invalidate()
 		}()
 	}
+	if aw.share.Clicked(gtx) {
+		if p, err := provider.Get(a.Provider); err == nil {
+			link := invite.For(p, a.Account).String()
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(link))})
+			aw.copiedUntil = time.Now().Add(6 * time.Second)
+			go func() { time.Sleep(6 * time.Second); u.invalidate() }()
+		}
+	}
 	if aw.logout.Clicked(gtx) && !busy {
 		if time.Now().Before(aw.confirmUntil) {
 			u.logout(a.ID)
@@ -495,6 +533,7 @@ func (u *UI) account(gtx C, a core.AccountView) D {
 			q := *a.Quota
 			children = append(children, vspace(14), layout.Rigid(func(gtx C) D { return u.usage(gtx, q) }))
 		}
+		children = append(children, vspace(10), layout.Rigid(func(gtx C) D { return u.shareRow(gtx, aw) }))
 		if a.Err != "" {
 			children = append(children, vspace(12), layout.Rigid(label(u.th, 13, a.Err, colDanger, font.Normal).Layout))
 			if a.NeedsSignIn {
@@ -520,6 +559,33 @@ func (u *UI) account(gtx C, a core.AccountView) D {
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
+}
+
+// shareRow is the "connect from another PC" button; after a click it says
+// the link was copied and what to do with it.
+func (u *UI) shareRow(gtx C, aw *acctWidgets) D {
+	copied := time.Now().Before(aw.copiedUntil)
+	txt := "다른 PC에서 연결"
+	if copied {
+		txt = "링크를 복사했어요"
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			b := smallButton(u.th, &aw.share, txt, colAccent)
+			b.Background = colAccentDim
+			return b.Layout(gtx)
+		}),
+		hspace(8),
+		layout.Flexed(1, func(gtx C) D {
+			hint := "새 PC에서 열면 로그인만 남아요"
+			if copied {
+				hint = "새 PC에서 링크를 열어 주세요"
+			}
+			l := label(u.th, 12, hint, colFaint, font.Normal)
+			l.MaxLines = 2
+			return l.Layout(gtx)
+		}),
+	)
 }
 
 func displayUser(a core.AccountView) string {
