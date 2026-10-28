@@ -13,6 +13,7 @@ import (
 	"gioui.org/widget"
 
 	"github.com/protomothis/proto-easy-mount/internal/core"
+	"github.com/protomothis/proto-easy-mount/internal/invite"
 	"github.com/protomothis/proto-easy-mount/internal/provider"
 )
 
@@ -268,6 +269,10 @@ func (f *addFlow) pickLayout(gtx C, closable bool) D {
 		}
 		children = append(children, layout.Rigid(func(gtx C) D { return f.providerRow(gtx, p) }))
 	}
+	f.u.mu.Lock()
+	uerr := f.err // a connection link that could not be used
+	f.u.mu.Unlock()
+	children = append(children, f.errorLines(uerr)...)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
@@ -363,20 +368,28 @@ func (f *addFlow) addressLayout(gtx C, closable bool) D {
 		}))
 	}
 
-	if uerr != nil {
-		children = append(children, vspace(12), layout.Rigid(label(th, 13, uerr.Msg, colDanger, font.Medium).Layout))
-		if uerr.Hint != "" {
-			children = append(children, vspace(3), layout.Rigid(label(th, 12, uerr.Hint, colSub, font.Normal).Layout))
-		}
-		if uerr.Err != nil {
-			children = append(children, vspace(3), layout.Rigid(func(gtx C) D {
-				l := label(th, 11, uerr.Err.Error(), colFaint, font.Normal)
-				l.MaxLines = 2
-				return l.Layout(gtx)
-			}))
-		}
-	}
+	children = append(children, f.errorLines(uerr)...)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// errorLines shows a failure: what happened, what to do, and the cause.
+func (f *addFlow) errorLines(uerr *provider.UserError) []layout.FlexChild {
+	if uerr == nil {
+		return nil
+	}
+	th := f.u.th
+	children := []layout.FlexChild{vspace(12), layout.Rigid(label(th, 13, uerr.Msg, colDanger, font.Medium).Layout)}
+	if uerr.Hint != "" {
+		children = append(children, vspace(3), layout.Rigid(label(th, 12, uerr.Hint, colSub, font.Normal).Layout))
+	}
+	if uerr.Err != nil {
+		children = append(children, vspace(3), layout.Rigid(func(gtx C) D {
+			l := label(th, 11, uerr.Err.Error(), colFaint, font.Normal)
+			l.MaxLines = 2
+			return l.Layout(gtx)
+		}))
+	}
+	return children
 }
 
 // passwordLogin reports whether the provider signs in with a password typed
@@ -399,6 +412,26 @@ func (f *addFlow) prefill(p provider.Provider, address string, values map[string
 	for k, v := range values {
 		f.optEditor(p.Name() + "/" + k).SetText(v)
 	}
+}
+
+// openLink fills in the address step from a connection link (#18). A link
+// it cannot use leaves the service list showing why.
+func (f *addFlow) openLink(raw string) {
+	l, err := invite.Parse(raw)
+	var p provider.Provider
+	if err == nil {
+		p, err = provider.Get(l.Provider)
+	}
+	if err != nil {
+		f.reset()
+		f.u.mu.Lock()
+		f.err = &provider.UserError{Msg: "연결 링크를 열 수 없어요.", Hint: "링크를 다시 복사해 보내 달라고 해 주세요.", Err: err}
+		f.u.mu.Unlock()
+		return
+	}
+	l = l.Keep(p)
+	f.prefill(p, l.Server, l.Options)
+	f.showAdv = len(l.Options) > 0 // show what the link filled in
 }
 
 func (f *addFlow) optionField(o provider.Option) layout.Widget {

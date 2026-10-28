@@ -149,11 +149,15 @@ type Service struct {
 	env   provider.Env
 	prefs *Prefs
 
-	pickMu    sync.Mutex // serialises automatic drive letter picks
-	mu        sync.Mutex
-	order     []string // account IDs in saved order
-	accounts  map[string]*accountState
-	mounts    map[mountKey]*mountState
+	pickMu   sync.Mutex // serialises automatic drive letter picks
+	mu       sync.Mutex
+	order    []string // account IDs in saved order
+	accounts map[string]*accountState
+	mounts   map[mountKey]*mountState
+	// quotas holds each drive's last listed quota (mountKey → provider.Quota)
+	// for the mounts' free space. Explorer asks from the file system's
+	// threads, so it is read without mu, which an unmount may be holding.
+	quotas    sync.Map
 	listeners []func()
 	activity  Activity
 	// Notify, when set, shows a system notification (network watch).
@@ -360,6 +364,14 @@ func (s *Service) loaded(as *accountState, drives []provider.Drive, instant bool
 	restore := as.restore
 	as.restore = false
 	s.mu.Unlock()
+	for _, d := range drives {
+		k := mountKey{as.acct.ID, d.ID}
+		if d.Quota != nil {
+			s.quotas.Store(k, *d.Quota)
+		} else {
+			s.quotas.Delete(k)
+		}
+	}
 	if restore {
 		for _, d := range s.prefs.remembered(as.acct.ID) {
 			s.Mount(as.acct.ID, d)
@@ -587,6 +599,15 @@ func (s *Service) start(as *accountState, d provider.Drive) (*mount.Mounted, err
 	}
 	if q := d.Quota; q != nil && !q.Unlimited() {
 		req.TotalSize = q.Total
+	}
+	k := mountKey{as.acct.ID, d.ID}
+	req.Usage = func() (used, total int64, ok bool) {
+		v, ok := s.quotas.Load(k)
+		if !ok {
+			return 0, 0, false
+		}
+		q := v.(provider.Quota)
+		return q.Used, q.Total, true
 	}
 	s.mu.Lock()
 	folder := s.instantFolder(as, d)

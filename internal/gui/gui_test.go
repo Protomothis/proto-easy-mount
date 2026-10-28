@@ -432,3 +432,28 @@ func TestPasswordProviderStep(t *testing.T) {
 		shot(t, u, dir, "add-pick", func(gtx C) D { return u.add.layout(gtx, true) })
 	}
 }
+
+// A connection link opens the address step filled in, keeping only what
+// the service shares; a link it cannot use stays on the service list.
+func TestLayoutOpenLink(t *testing.T) {
+	u := newUI(t, true)
+	open := func(link string) { u.mu.Lock(); u.link = link; u.mu.Unlock() } // OpenLink without a window
+
+	open("proto-easy-mount://add?provider=opencloud&server=https%3A%2F%2Fdrive.example.com&client_id=396758001312088073&user=evil")
+	render(t, u, "open-link")
+	if !u.showAdd || u.add.step != 1 || u.add.prov.Name() != "opencloud" || u.add.address.Text() != "https://drive.example.com" {
+		t.Fatalf("add flow: show=%v step=%d address=%q", u.showAdd, u.add.step, u.add.address.Text())
+	}
+	if got := u.add.optEditor("opencloud/client_id").Text(); got != "396758001312088073" || !u.add.showAdv {
+		t.Fatalf("client ID = %q, advanced shown %v", got, u.add.showAdv)
+	}
+	if _, ok := u.add.opts["opencloud/user"]; ok {
+		t.Fatal("a link filled in a user name")
+	}
+
+	open("proto-easy-mount://add?provider=nope&server=https%3A%2F%2Fa.example")
+	render(t, u, "open-link-bad")
+	if u.add.step != 0 || u.add.err == nil {
+		t.Fatalf("bad link: step=%d err=%v", u.add.step, u.add.err)
+	}
+}

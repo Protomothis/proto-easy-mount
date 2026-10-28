@@ -72,3 +72,41 @@ func TestWriteCacheStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Explorer's used and free space come from the app's quota once it is
+// known, and from the backend until then.
+func TestUsageReachesStatfs(t *testing.T) {
+	ri, err := fs.Find("local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := ri.NewFs(context.Background(), "usagetest", t.TempDir(), configmap.Simple{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var used, total int64
+	known := false
+	useUsage(f, func() (int64, int64, bool) { return used, total, known })
+
+	opt := vfscommon.Opt
+	opt.DirCacheTime = 0 // ask About on every Statfs
+	opt.DiskSpaceTotalSize = -1
+	v := vfs.New(context.Background(), f, &opt)
+	defer v.Shutdown()
+
+	// unknown: the local disk answers, so something is in use
+	if _, u, _ := v.Statfs(); u <= 0 {
+		t.Fatalf("unknown quota: used = %d, want the backend's figure", u)
+	}
+
+	known, used, total = true, 7<<30, 1<<40
+	if tot, u, free := v.Statfs(); tot != 1<<40 || u != 7<<30 || free != 1<<40-7<<30 {
+		t.Fatalf("limited quota: total=%d used=%d free=%d", tot, u, free)
+	}
+
+	// no limit: the used space still shows
+	total = 0
+	if _, u, free := v.Statfs(); u != 7<<30 || free <= 0 {
+		t.Fatalf("unlimited quota: used=%d free=%d", u, free)
+	}
+}

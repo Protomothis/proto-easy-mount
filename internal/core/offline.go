@@ -117,9 +117,11 @@ func (s *Service) probe(ctx context.Context, id string) {
 }
 
 // reachable reports whether the server answers at all. A 5xx from a proxy
-// in front of a stopped server counts as no answer.
+// in front of a stopped server counts as no answer. It asks for the
+// account's own address with HEAD: OpenCloud logs a warning for every
+// unauthenticated /status.php (8,640 a day at this rate), not for this.
 func reachable(ctx context.Context, server string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+"/status.php", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, server, nil)
 	if err != nil {
 		return false
 	}
