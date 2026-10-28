@@ -141,3 +141,20 @@ func TestUnmountSuspended(t *testing.T) {
 		t.Fatalf("after switching off: %+v", ms)
 	}
 }
+
+// The probe is a HEAD on the account's address: OpenCloud logs a warning
+// for every /status.php without a token.
+func TestProbeRequest(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusUnauthorized) // a bare WebDAV server: still an answer
+	}))
+	defer srv.Close()
+	if !reachable(context.Background(), srv.URL+"/dav/") {
+		t.Fatal("401 should count as an answer")
+	}
+	if got != "HEAD /dav/" {
+		t.Fatalf("probe = %q, want HEAD /dav/", got)
+	}
+}
